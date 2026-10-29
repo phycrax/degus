@@ -1,0 +1,18 @@
+[package]
+name = "degus-project"
+version.workspace = true
+edition.workspace = true
+description = "Builds DWIN T5L DWIN_SET folders from a TOML project description"
+
+[dependencies]
+degus-config = { workspace = true, features = ["serde"] }
+degus-controls = { workspace = true, features = ["serde"] }
+degus-icl.workspace = true
+degus-wae.workspace = true
+image = { version = "0.25.10", default-features = false, features = ["png", "bmp", "jpeg", "gif"] }
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+toml = "1.1.8"
+
+[dev-dependencies]
+hound = "3.5.1"

@@ -1,0 +1,16 @@
+[package]
+name = "degus-controls"
+version.workspace = true
+edition.workspace = true
+description = "Builds DWIN T5L touch (13) and display variable (14) configuration files"
+
+[dependencies]
+num_enum = "0.7.6"
+serde = { version = "1.0.229", features = ["derive"], optional = true }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+hex-literal = "1.1.0"
+
+[features]
+serde = ["dep:serde"]

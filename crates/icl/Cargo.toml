@@ -1,0 +1,11 @@
+[package]
+name = "degus-icl"
+version.workspace = true
+edition.workspace = true
+description = "Builds DWIN T5L ICL (DGUS_3) icon libraries"
+
+[dependencies]
+crc = "3.4.0"
+image = { version = "0.25.10", default-features = false, features = ["png", "bmp", "jpeg", "gif", "ico"] }
+jpeg-encoder = "0.7.1"
+thiserror = "2.0.21"
