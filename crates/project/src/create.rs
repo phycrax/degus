@@ -7,11 +7,18 @@ use crate::model::{PROJECT_FILE_NAME, Size};
 
 /// Creates the project folder `dir` with a `project.toml` for a screen of
 /// `screen`, and returns the project file. Fails if `dir` exists.
+///
+/// The file starts with a comment pointing to `degus guide`, so whoever
+/// opens it, person or agent, finds the format.
 pub fn new(dir: impl AsRef<Path>, screen: Size) -> Result<PathBuf> {
     let mut folder = NewFolder::default();
     folder.write(
         PROJECT_FILE_NAME,
-        format!("screen = {{ w = {}, h = {} }}\n", screen.w, screen.h),
+        format!(
+            "# degus project: run \"degus guide\" for the format\n\
+             screen = {{ w = {}, h = {} }}\n",
+            screen.w, screen.h
+        ),
     );
     let dir = dir.as_ref();
     folder.create(dir)?;

@@ -1,12 +1,17 @@
-//! `degus`: builds a DWIN T5L `DWIN_SET` folder from a TOML project. See
-//! `docs/project-format.md` in the repository for the project format.
+//! `degus`: builds a DWIN T5L `DWIN_SET` folder from a TOML project.
+//! `degus guide` prints the project format, `docs/project-format.md` in the
+//! repository.
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
 use degus_project::model::Size;
 use degus_project::{BuiltFile, DWIN_SET, Diagnostic, Error, Project, Result, Severity};
+
+/// The project format reference that `degus guide` prints.
+const GUIDE: &str = include_str!("../../../docs/project-format.md");
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -44,6 +49,9 @@ enum Command {
         #[arg(long, default_value = "1920x1080")]
         screen: Size,
     },
+    /// Prints the project format: how to write project.toml and the
+    /// controls files.
+    Guide,
 }
 
 #[derive(Args)]
@@ -59,6 +67,7 @@ fn main() -> ExitCode {
         Command::Check { project } => check(project.project),
         Command::Clean { project } => clean(project.project),
         Command::New { path, screen } => new(path, screen),
+        Command::Guide => guide(),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -130,6 +139,12 @@ fn clean(path: PathBuf) -> Result<()> {
 fn new(path: PathBuf, screen: Size) -> Result<()> {
     degus_project::new(&path, screen)?;
     println!("created {}", path.display());
+    Ok(())
+}
+
+fn guide() -> Result<()> {
+    // A closed pipe, as in `degus guide | head`, is not an error.
+    let _ = std::io::stdout().write_all(GUIDE.as_bytes());
     Ok(())
 }
 

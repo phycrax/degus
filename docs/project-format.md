@@ -11,6 +11,7 @@ degus new my-hmi --screen 800x480   # creates my-hmi/project.toml
 degus check my-hmi                  # reports problems, builds nothing
 degus build my-hmi                  # writes my-hmi/target/DWIN_SET
 degus clean my-hmi                  # deletes it
+degus guide                         # prints this document
 ```
 
 The project folder defaults to the current one, and `degus build -o <dir>`
