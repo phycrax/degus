@@ -1,7 +1,7 @@
-//! A text protocol for links, until DGUS frames come from `dguscard`: the
-//! host sends script lines (`write 0x1000 1`, `read 0x1000 2`), the display
-//! answers `ack`, `data 0x1000 0x0001` and sends `upload 0x1000 0x0001`.
-//! Easy to drive from `nc`, Python or a test.
+//! A text protocol for links, in place of DGUS frames: the host sends script
+//! lines (`write 0x1000 1`, `read 0x1000 2`), the display answers `ack`,
+//! `data 0x1000 0x0001` and sends `upload 0x1000 0x0001`. Easy to drive from
+//! `nc`, Python or a test.
 
 use crate::host::{Codec, Decoded, DeviceMsg};
 use crate::script::parse_line;
@@ -48,9 +48,10 @@ impl Codec for LineCodec {
         }
     }
 
-    fn encode(&mut self, msg: &DeviceMsg, out: &mut Vec<u8>) {
+    fn encode(&mut self, msg: &DeviceMsg, out: &mut Vec<u8>) -> Result<(), String> {
         out.extend_from_slice(msg.to_string().as_bytes());
         out.push(b'\n');
+        Ok(())
     }
 
     fn encode_error(&mut self, error: &str, out: &mut Vec<u8>) {
@@ -94,14 +95,16 @@ mod tests {
     fn encodes_messages_as_lines() {
         let mut codec = LineCodec::new();
         let mut out = Vec::new();
-        codec.encode(&DeviceMsg::Ack, &mut out);
-        codec.encode(
-            &DeviceMsg::Upload {
-                vp: 0x1000,
-                data: vec![1],
-            },
-            &mut out,
-        );
+        codec.encode(&DeviceMsg::Ack, &mut out).unwrap();
+        codec
+            .encode(
+                &DeviceMsg::Upload {
+                    vp: 0x1000,
+                    data: vec![1],
+                },
+                &mut out,
+            )
+            .unwrap();
         assert_eq!(out, b"ack\nupload 0x1000 0x0001\n");
     }
 }

@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use degus_project::model::Size;
 use degus_project::{BuiltFile, DWIN_SET, Diagnostic, Error, Project, Result, Severity};
 use degus_sim::{LoadError, Runner, Sim, World};
@@ -66,15 +66,27 @@ struct SimArgs {
     /// and display; `shot` paths are relative to the script.
     #[arg(long, value_name = "FILE")]
     script: Option<PathBuf>,
-    /// Accepts a host on this TCP address, such as 127.0.0.1:5000. It
-    /// speaks script lines: `write 0x1000 1`, `read 0x1000 2`.
+    /// Accepts a host on this TCP address, such as 127.0.0.1:5000.
     #[arg(long, value_name = "ADDR", conflicts_with = "script")]
     tcp: Option<String>,
-    /// Accepts a host on this serial port at the configured baud rate,
-    /// speaking script lines like `--tcp`.
+    /// Accepts a host on this serial port at the configured baud rate.
     #[cfg(feature = "serial")]
     #[arg(long, value_name = "PORT", conflicts_with = "script")]
     serial: Option<String>,
+    /// What the host speaks over `--tcp` or `--serial`.
+    #[arg(long, value_enum, default_value_t = Protocol::Frames)]
+    protocol: Protocol,
+}
+
+/// What a link to the host speaks.
+#[derive(Clone, Copy, ValueEnum)]
+enum Protocol {
+    /// DGUS frames, `5A A5 len cmd data [crc]`, as the panel speaks them on
+    /// UART2, with CRC as the project's `crc` sets it.
+    Frames,
+    /// Script lines, `write 0x1000 1` and `read 0x1000 2`, answered `ack`
+    /// and `data 0x1000 0x0001`: for typing by hand, such as with `nc`.
+    Lines,
 }
 
 #[derive(Args)]
@@ -208,12 +220,19 @@ fn sim(args: SimArgs) -> ExitCode {
 
 #[cfg(feature = "gui")]
 fn window(sim: Sim, args: &SimArgs) -> ExitCode {
-    use degus_sim::{LineCodec, Link};
+    use degus_sim::{Codec, FrameCodec, LineCodec, Link};
 
+    let crc = sim.world().config.crc;
+    let codec = || -> Box<dyn Codec> {
+        match args.protocol {
+            Protocol::Frames => Box::new(FrameCodec::new(crc)),
+            Protocol::Lines => Box::new(LineCodec::new()),
+        }
+    };
     let gui = degus_sim_gui::Gui::new();
     let mut links = Vec::new();
     if let Some(addr) = &args.tcp {
-        match Link::tcp(addr, Box::new(LineCodec::new()), gui.waker()) {
+        match Link::tcp(addr, codec(), gui.waker()) {
             Ok(link) => links.push(link),
             Err(error) => {
                 eprintln!("error: cannot listen on {addr}: {error}");
@@ -224,7 +243,7 @@ fn window(sim: Sim, args: &SimArgs) -> ExitCode {
     #[cfg(feature = "serial")]
     if let Some(port) = &args.serial {
         let baud = sim.world().config.baud();
-        match Link::serial(port, baud, Box::new(LineCodec::new()), gui.waker()) {
+        match Link::serial(port, baud, codec(), gui.waker()) {
             Ok(link) => links.push(link),
             Err(error) => {
                 eprintln!("error: cannot open {port}: {error}");

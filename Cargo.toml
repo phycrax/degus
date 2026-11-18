@@ -14,6 +14,8 @@ degus-project = { path = "crates/project" }
 degus-sim = { path = "crates/sim" }
 degus-sim-gui = { path = "crates/sim-gui" }
 degus-wae = { path = "crates/wae" }
+# The display's side of the DGUS frames
+dguscard = { path = "../dguscard/dguscard", default-features = false }
 
 [profile.dev.package."*"]
 opt-level = 3

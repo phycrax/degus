@@ -2,9 +2,9 @@
 //! carries it.
 //!
 //! A [`Codec`] turns bytes into [`HostCmd`]s and [`DeviceMsg`]s into
-//! bytes. [`LineCodec`](crate::LineCodec) speaks a text protocol; the DGUS
-//! frame codec (`5A A5 len cmd data [crc]`) is to come from the `dguscard`
-//! crate's device side.
+//! bytes. [`FrameCodec`](crate::FrameCodec) speaks DGUS frames
+//! (`5A A5 len cmd data [crc]`) like the panel; [`LineCodec`](crate::LineCodec)
+//! speaks a text protocol for typing by hand.
 
 use std::fmt;
 
@@ -43,8 +43,9 @@ pub trait Codec: Send {
     /// keeps the rest for the next call.
     fn decode(&mut self, bytes: &[u8], out: &mut Vec<Decoded>);
 
-    /// Appends the bytes of `msg` to `out`.
-    fn encode(&mut self, msg: &DeviceMsg, out: &mut Vec<u8>);
+    /// Appends the bytes of `msg` to `out`, or says why `msg` cannot be
+    /// sent, such as a read reply too long for one frame.
+    fn encode(&mut self, msg: &DeviceMsg, out: &mut Vec<u8>) -> Result<(), String>;
 
     /// Appends what tells the host that its input could not be decoded.
     /// The display itself stays silent, so by default nothing.

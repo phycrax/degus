@@ -161,10 +161,17 @@ impl Link {
         self.events.try_iter().collect()
     }
 
-    /// Sends `msg` to the host, if one is connected.
+    /// Sends `msg` to the host, if one is connected. A message the codec
+    /// cannot encode is an [`InvalidInput`](std::io::ErrorKind::InvalidInput)
+    /// error.
     pub fn send(&self, msg: &DeviceMsg) -> std::io::Result<()> {
         let mut bytes = Vec::new();
-        self.shared.codec.lock().unwrap().encode(msg, &mut bytes);
+        self.shared
+            .codec
+            .lock()
+            .unwrap()
+            .encode(msg, &mut bytes)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
         self.shared.write(&bytes)
     }
 }
@@ -213,7 +220,19 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
+    use crate::frames::FrameCodec;
     use crate::line::LineCodec;
+
+    /// The first `count` events, waiting up to 5 s for them.
+    fn events(link: &Link, count: usize) -> Vec<LinkEvent> {
+        let mut events = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while events.len() < count && Instant::now() < deadline {
+            events.extend(link.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        events
+    }
 
     #[test]
     fn serves_a_tcp_host() {
@@ -222,12 +241,7 @@ mod tests {
         let mut host = TcpStream::connect(&addr).unwrap();
         host.write_all(b"write 0x1000 7\nbogus\n").unwrap();
 
-        let mut events = Vec::new();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while events.len() < 3 && Instant::now() < deadline {
-            events.extend(link.poll());
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        let events = events(&link, 3);
         assert!(matches!(events[0], LinkEvent::Connected(_)));
         assert_eq!(
             events[1],
@@ -242,5 +256,40 @@ mod tests {
         let mut lines = BufReader::new(host).lines();
         assert!(lines.next().unwrap().unwrap().starts_with("error "));
         assert_eq!(lines.next().unwrap().unwrap(), "ack");
+    }
+
+    #[test]
+    fn serves_frames_over_tcp() {
+        let codec = FrameCodec::new(true);
+        let link = Link::tcp("127.0.0.1:0", Box::new(codec), Arc::new(|| {})).unwrap();
+        let addr = link.name().strip_prefix("tcp ").unwrap().to_owned();
+        let mut host = TcpStream::connect(&addr).unwrap();
+        host.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        // The guide's write with CRC, in two pieces.
+        host.write_all(&[0x5A, 0xA5, 0x07, 0x82, 0x10]).unwrap();
+        host.write_all(&[0x00, 0x31, 0x32, 0xCC, 0x9B]).unwrap();
+
+        let events = events(&link, 2);
+        assert!(matches!(events[0], LinkEvent::Connected(_)));
+        assert_eq!(
+            events[1],
+            LinkEvent::Cmd(HostCmd::WriteVp {
+                vp: 0x1000,
+                data: vec![0x31, 0x32]
+            })
+        );
+
+        link.send(&DeviceMsg::Ack).unwrap();
+        let mut ack = [0u8; 8];
+        host.read_exact(&mut ack).unwrap();
+        assert_eq!(ack, [0x5A, 0xA5, 0x05, 0x82, b'O', b'K', 0xA5, 0xEF]);
+
+        // A reply no frame holds is refused, not cut short.
+        let long = DeviceMsg::ReadReply {
+            vp: 0x1000,
+            data: vec![0; 200],
+        };
+        let error = link.send(&long).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
     }
 }

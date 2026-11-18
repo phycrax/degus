@@ -10,6 +10,7 @@ degus-controls.workspace = true
 degus-icl.workspace = true
 degus-project.workspace = true
 degus-wae.workspace = true
+dguscard.workspace = true
 embedded-graphics = "0.8.2"
 encoding_rs = "0.8.44"
 image = { version = "0.25.10", default-features = false, features = ["png", "bmp", "jpeg", "gif"] }

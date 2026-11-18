@@ -26,12 +26,14 @@
 //! ```
 //!
 //! [`Runner`] runs scripts of such steps; [`Link`] connects a host over TCP
-//! (or a serial port with the `serial` feature) through a [`Codec`].
+//! (or a serial port with the `serial` feature) through a [`Codec`]: DGUS
+//! frames with [`FrameCodec`], or text lines with [`LineCodec`].
 
 mod audio;
 mod draw;
 mod font;
 mod format;
+mod frames;
 mod host;
 mod input;
 mod line;
@@ -50,6 +52,7 @@ pub use audio::{AudioSource, CLIP_RATE, FULL_VOLUME, ProjectAudio, Samples, Soun
 pub use degus_config::Buzzer;
 pub use draw::{Rect, rgb565};
 pub use format::{Number, format_number};
+pub use frames::FrameCodec;
 pub use host::{Codec, Decoded, DeviceMsg, HostCmd};
 pub use input::{KEY_BACKSPACE, KEY_CANCEL, KEY_DOT, KEY_ENTER, KEY_SIGN};
 pub use line::LineCodec;
