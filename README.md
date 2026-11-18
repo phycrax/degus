@@ -45,8 +45,10 @@ icon_max = 1
 cargo install --git https://github.com/phycrax/degus
 ```
 
-For the simulator's window, add `--features gui`; `--features serial` also
-lets a host connect over a serial port.
+For the simulator's window, add `--features gui`; it plays the display's
+sounds too, which on Linux needs the ALSA development package
+(`libasound2-dev`). `--features serial` also lets a host connect over a
+serial port.
 
 ## Use
 
@@ -86,8 +88,9 @@ fails on unmet `expect` lines.
 and images, without building. A script runs headless: VP writes and reads
 as the host, touches, screenshots and expectations, for tests and agents. A
 window (`--features gui`) takes clicks as touches, shows the VPs and logs
-what passes between host and display; with `--tcp`, a host program drives
-it with `write` and `read` lines.
+what passes between host and display, and plays the clips and beeps the
+display would; with `--tcp`, a host program drives it with `write` and
+`read` lines.
 
 It is a preview: fonts are a stand-in, images skip the JPEG round trip, and
 where DWIN's guide is silent the simulator guesses

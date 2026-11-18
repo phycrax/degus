@@ -59,6 +59,22 @@ Display controls:
 
 System variables:
 
+Sound:
+
+- In music mode, a new clip cuts off the one playing: one channel.
+- The display clears `0x00A0`'s count byte in both modes, once it has
+  started the clip or the beep.
+- A volume above `0x40` plays at 100 %.
+- `0x00A1`'s low byte reads 2 from the start of a clip until its length has
+  passed, then 0. It never reads 1 (paused).
+- Only touches on a touch control sound, not touches on bare screen.
+- The buzzer sounds like a square wave at its frequency and duty, without
+  DC. A narrower pulse sounds quieter.
+- 8-bit (12:8) clips expand each code to the middle of its range. The spec
+  documents only the encoder. (`degus-wae`)
+
+System variables:
+
 - `0x00DE`/`0x00DF` keep the background ICL switched while `0x00DE`'s high
   byte stays `5A`, and `0x00DF` holds the whole ICL ID. (`system.rs`)
 - The RTC (`0x0010`) reads the PC's clock, in UTC. (`system.rs`)
@@ -76,6 +92,12 @@ System variables:
   the `5A` is cleared after (§5.1).
 - `0x0016` reports touches as `5A` + state (1 press, 2 lift, 3 pressing),
   X and Y (§5.1).
+- `0x00A0` in music mode: clip ID, `01` to play, volume in 1/64 steps
+  starting at `0x40`, status, and `5A` + a WAE number to play from instead
+  of the CFG's. In buzzer mode the count byte is the beep length in 8 ms
+  units (§3.3.2.5 and §5.1).
+- The buzzer's tone is 825.7536 MHz / (`div1` × `div2`) at `duty` / `div2`,
+  and a touch beeps for `time` × 10 ms (CFG `0x28`–`0x2D`).
 - A progress bar writes its percentage, 0–100, to its rate VP (§7.23).
 
 ## Not simulated
@@ -84,8 +106,10 @@ System variables:
   IDs are ignored.
 - JPEG artifacts, and anything else the ICL build or the panel's hardware
   changes, such as the JPEG header layout.
-- Audio (`0x00A0`, touch sound), standby dimming, rotation, file 22, and
-  description pointers (`sp`).
+- Voice IDs: music-mode touch sounds play the control's voice ID, which
+  degus does not build, so they are silent.
+- Pausing a clip, standby dimming, rotation, file 22, and description
+  pointers (`sp`).
 - DGUS frames on the UART (`5A A5 len cmd data [crc]`). Links speak a
   text protocol until a frame codec exists, planned as a device side in
   the `dguscard` crate.
