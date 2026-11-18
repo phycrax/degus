@@ -1,3 +1,5 @@
+use std::assert_matches;
+
 use degus_controls::{
     Align, Area, BarDataType, BarDirection, Controls, CursorColor, DataInput, DataType, DataVar,
     Display, Encoding, Error, IconVar, InputDataType, KeyCode, KeyTarget, Keyboard, LayerMode,
@@ -435,10 +437,7 @@ fn writes_every_field() {
 fn rejects_what_the_files_cannot_hold() {
     let mut controls = Controls::new();
     controls.page_mut(4092);
-    assert!(matches!(
-        controls.build(),
-        Err(Error::PageId { page: 4092 })
-    ));
+    assert_matches!(controls.build(), Err(Error::PageId { page: 4092 }));
 
     let mut controls = Controls::new();
     controls.insert(
@@ -448,13 +447,13 @@ fn rejects_what_the_files_cannot_hold() {
             display: (0..256).map(icon).collect(),
         },
     );
-    assert!(matches!(
+    assert_matches!(
         controls.build(),
         Err(Error::TooManyDisplays {
             page: 1,
             count: 256
         })
-    ));
+    );
 
     for unit in ["twelve bytes", "°C"] {
         let mut controls = Controls::new();
@@ -465,7 +464,7 @@ fn rejects_what_the_files_cannot_hold() {
             }
             .into(),
         );
-        assert!(matches!(controls.build(), Err(Error::Unit { page: 2, .. })));
+        assert_matches!(controls.build(), Err(Error::Unit { page: 2, .. }));
     }
 
     let mut controls = Controls::new();
@@ -476,10 +475,7 @@ fn rejects_what_the_files_cannot_hold() {
             ..KeyCode::new(0, 0)
         },
     ));
-    assert!(matches!(
-        controls.build(),
-        Err(Error::BitIndex { page: 3, bit: 16 })
-    ));
+    assert_matches!(controls.build(), Err(Error::BitIndex { page: 3, bit: 16 }));
 
     // Basic touch codes starting with FE or FD would read as other controls.
     for code in [0xFE31, 0xFD00] {
@@ -488,9 +484,9 @@ fn rejects_what_the_files_cannot_hold() {
             .page_mut(6)
             .touch
             .push(Touch::new(Area::default(), TouchAction::Basic(code)));
-        assert!(matches!(
+        assert_matches!(
             controls.build(),
             Err(Error::BasicKey { page: 6, code: c }) if c == code
-        ));
+        );
     }
 }

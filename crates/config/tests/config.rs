@@ -1,3 +1,5 @@
+use std::assert_matches;
+
 use degus_config::{
     Audio, Buzzer, ClockOut, Config, Error, FILE_LEN, Lcd, NandSize, Rotation, TouchPanel,
 };
@@ -146,12 +148,12 @@ fn rejects_values_out_of_range() {
         }),
         "standby_delay is 0, not in 1-65535"
     );
-    assert!(matches!(
+    assert_matches!(
         Config {
             sd_folder: Some("TOO_LONG_NAME".into()),
             ..Config::default()
         }
         .build(),
         Err(Error::SdFolder(_))
-    ));
+    );
 }

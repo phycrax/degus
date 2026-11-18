@@ -60,10 +60,10 @@ mod tests {
     #[test]
     fn compand_maps_both_ends_of_each_range_to_its_code() {
         for (code, &lower) in COMPAND.iter().enumerate() {
-            let low = (lower << 4) as i16;
+            let low = (lower << 4).cast_signed();
             let high = COMPAND
                 .get(code + 1)
-                .map_or(i16::MAX, |&next| ((next << 4) - 1) as i16);
+                .map_or(i16::MAX, |&next| ((next << 4) - 1).cast_signed());
             for sample in [low, high] {
                 assert_eq!(compand(sample), code as u8, "sample {sample}");
                 if sample != 0 {

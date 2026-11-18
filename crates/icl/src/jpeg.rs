@@ -251,6 +251,8 @@ fn renumber_components(data: &mut [u8], sof: usize, sos: usize) -> Result<(), Jp
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
     use jpeg_encoder::{ColorType, Encoder, SamplingFactor};
 
@@ -327,10 +329,10 @@ mod tests {
         let mut jpeg = baseline(8, 8, SamplingFactor::F_1_1);
         let sos = jpeg.windows(2).position(|w| w == [0xFF, SOS]).unwrap();
         jpeg[sos + 5] = 9;
-        assert!(matches!(
+        assert_matches!(
             prepare(&jpeg, usize::MAX),
             Err(Error::Jpeg(JpegError::UnknownComponent(9)))
-        ));
+        );
     }
 
     #[test]
@@ -385,9 +387,9 @@ mod tests {
     fn enforces_size_limit_before_padding() {
         let jpeg = baseline(32, 32, SamplingFactor::F_2_2);
         assert!(prepare(&jpeg, jpeg.len()).is_ok());
-        assert!(matches!(
+        assert_matches!(
             prepare(&jpeg, jpeg.len() - 1),
             Err(Error::IconTooLarge { size, .. }) if size == jpeg.len()
-        ));
+        );
     }
 }

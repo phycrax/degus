@@ -10,6 +10,7 @@ use crate::options::{IclOptions, OversizePolicy, Subsampling};
 
 /// A prepared icon and the JPEG quality it was encoded at (`None` when the
 /// source JPEG was stored unchanged).
+#[derive(Debug)]
 pub(crate) struct Encoded {
     pub jpeg: PreparedJpeg,
     pub quality: Option<u8>,
@@ -114,6 +115,8 @@ fn encode_rgb(
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
     use image::{Rgba, RgbaImage};
 
@@ -159,10 +162,10 @@ mod tests {
             encode_image(&image, &options, limit)
         };
 
-        assert!(matches!(
+        assert_matches!(
             encode(OversizePolicy::Error),
             Err(Error::IconTooLarge { .. })
-        ));
+        );
         // Step 1 settles on the highest quality that fits.
         let quality = encode(OversizePolicy::reduce_quality())
             .unwrap()
@@ -189,10 +192,10 @@ mod tests {
                 oversize: OversizePolicy::ReduceQuality { step },
                 ..IclOptions::default()
             };
-            assert!(matches!(
+            assert_matches!(
                 encode_image(&image, &options, 100),
                 Err(Error::IconTooLarge { .. })
-            ));
+            );
         }
     }
 }
