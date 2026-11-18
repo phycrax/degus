@@ -46,6 +46,8 @@ mod vp;
 mod world;
 
 pub use audio::{AudioSource, CLIP_RATE, FULL_VOLUME, ProjectAudio, Samples, Sound, buzzer_tone};
+/// The buzzer settings a [`Sound::Beep`] carries.
+pub use degus_config::Buzzer;
 pub use draw::{Rect, rgb565};
 pub use format::{Number, format_number};
 pub use host::{Codec, Decoded, DeviceMsg, HostCmd};

@@ -1,6 +1,7 @@
 //! The window of the degus display simulator: the screen, which takes
 //! clicks as touches, the page list, a VP inspector, a host command box and
-//! a log of everything that passes between host and display.
+//! a log of everything that passes between host and display. With the
+//! `audio` feature, on by default, it plays the display's clips and beeps.
 //!
 //! ```no_run
 //! use degus_sim::{LineCodec, Link, Sim};
@@ -27,10 +28,16 @@ use eframe::egui::{
 };
 use image::RgbImage;
 
+mod speaker;
+
+use speaker::Speaker;
+
 /// Lines the log keeps.
 const LOG_LINES: usize = 5000;
 /// How often the simulator ticks while a touch or an input is active.
 const ACTIVE_TICK: Duration = Duration::from_millis(50);
+/// Master volume at first start.
+const DEFAULT_VOLUME: f32 = 0.8;
 
 /// Starts the window. Create it first, so links can wake the window with
 /// [`Gui::waker`].
@@ -194,6 +201,10 @@ struct App {
     command: String,
     /// The pointer is down on the screen.
     touching: bool,
+    speaker: Speaker,
+    sound: bool,
+    /// Master volume, 0-1.
+    volume: f32,
 }
 
 impl App {
@@ -214,10 +225,14 @@ impl App {
             hex_start: "0x1000".to_owned(),
             command: String::new(),
             touching: false,
+            speaker: Speaker::new(DEFAULT_VOLUME),
+            sound: true,
+            volume: DEFAULT_VOLUME,
         };
         if let Some(storage) = cc.storage {
             app.restore(storage);
         }
+        app.speaker.set_volume(app.master_volume());
         let names: Vec<String> = app
             .links
             .iter()
@@ -259,6 +274,15 @@ impl App {
         if let Some(start) = storage.get_string("hex_start") {
             self.hex_start = start;
         }
+        self.sound = storage.get_string("sound").as_deref() != Some("off");
+        if let Some(volume) = storage.get_string("volume").and_then(|v| v.parse().ok()) {
+            self.volume = f32::clamp(volume, 0.0, 1.0);
+        }
+    }
+
+    /// The speaker's volume: 0 while the sound is off.
+    fn master_volume(&self) -> f32 {
+        if self.sound { self.volume } else { 0.0 }
     }
 
     fn push(&mut self, kind: LogKind, text: impl Into<String>) {
@@ -282,9 +306,16 @@ impl App {
                 Event::Page(page) => format!("page {page}"),
                 Event::Reset => "reset".to_owned(),
                 Event::Note(note) => note,
-                Event::Sound(sound) => format!("sound {sound}"),
+                Event::Sound(sound) => {
+                    let text = format!("sound {sound}");
+                    self.speaker.play(sound);
+                    text
+                }
             };
             self.push(LogKind::Event, text);
+        }
+        for problem in self.speaker.problems() {
+            self.push(LogKind::Error, problem);
         }
     }
 
@@ -382,6 +413,15 @@ impl App {
             }
             ui.separator();
             ui.checkbox(&mut self.overlay, "outlines");
+            ui.separator();
+            let sound = ui.checkbox(&mut self.sound, "sound");
+            let volume = ui.add_enabled(
+                self.sound,
+                egui::Slider::new(&mut self.volume, 0.0..=1.0).show_value(false),
+            );
+            if sound.changed() || volume.changed() {
+                self.speaker.set_volume(self.master_volume());
+            }
             ui.separator();
             ui.label(format!("backlight {}%", self.sim.brightness()));
             ui.separator();
@@ -728,5 +768,7 @@ impl eframe::App for App {
             if self.overlay { "on" } else { "off" }.to_owned(),
         );
         storage.set_string("hex_start", self.hex_start.clone());
+        storage.set_string("sound", if self.sound { "on" } else { "off" }.to_owned());
+        storage.set_string("volume", self.volume.to_string());
     }
 }
