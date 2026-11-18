@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use degus_config::Audio;
 use degus_controls::{KeyCode, KeyTarget, Keyboard, Touch, TouchAction};
 
 use crate::draw::Rect;
@@ -54,6 +55,7 @@ impl Sim {
         if let Some(target) = target
             && let Some(touch) = self.target_touch(target).cloned()
         {
+            self.touch_sound();
             match touch.action {
                 // ASSUME: a return key code fires on press, or after its hold
                 // time when it has one.
@@ -205,6 +207,30 @@ impl Sim {
         let _ = self.store(key.vp, &[new]);
         if key.upload && self.auto_upload {
             self.upload(key.vp, 1);
+        }
+    }
+
+    /// The sound of pressing a touch control, if touch sound is on: the
+    /// buzzer for its configured time. In music mode a touch plays its
+    /// control's voice ID, which degus does not build, so nothing.
+    // ASSUME: only touches on a touch control sound, not on bare screen.
+    fn touch_sound(&mut self) {
+        if !self.touch_sound {
+            return;
+        }
+        match self.world.config.audio {
+            Audio::Buzzer => {
+                let time = self.world.config.buzzer.unwrap_or_default().time;
+                self.beep(Duration::from_millis(10) * u32::from(time));
+            }
+            Audio::Music => {
+                if !self.voice_noted {
+                    self.voice_noted = true;
+                    self.note(
+                        "touch sound in music mode plays voice IDs, which degus does not build yet",
+                    );
+                }
+            }
         }
     }
 

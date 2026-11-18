@@ -28,6 +28,7 @@
 //! [`Runner`] runs scripts of such steps; [`Link`] connects a host over TCP
 //! (or a serial port with the `serial` feature) through a [`Codec`].
 
+mod audio;
 mod draw;
 mod font;
 mod format;
@@ -44,6 +45,7 @@ mod transport;
 mod vp;
 mod world;
 
+pub use audio::{AudioSource, CLIP_RATE, FULL_VOLUME, ProjectAudio, Samples, Sound, buzzer_tone};
 pub use draw::{Rect, rgb565};
 pub use format::{Number, format_number};
 pub use host::{Codec, Decoded, DeviceMsg, HostCmd};

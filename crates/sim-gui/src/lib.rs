@@ -282,6 +282,7 @@ impl App {
                 Event::Page(page) => format!("page {page}"),
                 Event::Reset => "reset".to_owned(),
                 Event::Note(note) => note,
+                Event::Sound(sound) => format!("sound {sound}"),
             };
             self.push(LogKind::Event, text);
         }

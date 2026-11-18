@@ -2,10 +2,17 @@
 //! application guide, chapter 5. Writes the simulator does not act on are
 //! stored and reported once.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use degus_config::Audio;
+
+use crate::audio::{FULL_VOLUME, Sound};
 use crate::sim::{Event, Sim};
 use crate::vp::USER_START;
+
+/// `0x00A0` play status.
+const STOPPED: u8 = 0x00;
+const PLAYING: u8 = 0x02;
 
 /// Write `55AA 5AA5` to reset.
 pub const SYSTEM_RESET: u16 = 0x0004;
@@ -28,6 +35,10 @@ pub const SYSTEM_CONFIG: u16 = 0x0080;
 pub const LED_CONFIG: u16 = 0x0082;
 /// `5A 01` then a page ID: switch page.
 pub const PIC_SET: u16 = 0x0084;
+/// Four words. Music mode: clip ID and `01` to play it; volume in 1/64
+/// steps and the play status (0 stopped, 2 playing); `5A` and a WAE file
+/// number to play from instead of the configuration's. Buzzer mode: the
+/// low byte of the first word beeps for that many 8 ms.
 pub const MUSIC_PLAY: u16 = 0x00A0;
 /// `5A` enables switching the background ICL to the one in `0x00DF`.
 pub const ICL_SWITCH: u16 = 0x00DE;
@@ -43,7 +54,7 @@ const HANDLED: [(u16, u16); 6] = [
     (RTC, 4),
     (TP_STATUS, 4),
     (SYSTEM_CONFIG, 6),
-    (MUSIC_PLAY, 2),
+    (MUSIC_PLAY, 4),
     (ICL_SWITCH, 2),
 ];
 /// System VPs only the display writes.
@@ -70,7 +81,78 @@ impl Sim {
         ]);
         let standby_delay = config.standby_delay;
         let _ = self.vp.write(LED_CONFIG, &[led, standby_delay]);
+        // The guide: volume starts at 0x40, 100 %.
+        self.vp.set_high(MUSIC_PLAY + 1, FULL_VOLUME);
         self.sync_readonly();
+    }
+
+    /// Acts on a write to `0x00A0`: plays a clip in music mode, beeps in
+    /// buzzer mode.
+    // ASSUME: the display clears the count byte in both modes, a volume
+    // above 0x40 plays at 100 %, and a new clip cuts off the one playing.
+    fn music_command(&mut self) {
+        let count = self.vp.low(MUSIC_PLAY);
+        if count != 0 {
+            self.vp.set_low(MUSIC_PLAY, 0);
+            match self.world.config.audio {
+                Audio::Buzzer => {
+                    self.beep(Duration::from_millis(8) * u32::from(count));
+                }
+                Audio::Music => {
+                    let id = self.vp.high(MUSIC_PLAY);
+                    let volume = self.vp.high(MUSIC_PLAY + 1).min(FULL_VOLUME);
+                    let wae = if self.vp.high(MUSIC_PLAY + 2) == ENABLE {
+                        u16::from_be_bytes([
+                            self.vp.low(MUSIC_PLAY + 2),
+                            self.vp.high(MUSIC_PLAY + 3),
+                        ])
+                    } else {
+                        self.world.config.music_wae.into()
+                    };
+                    self.play_clip(wae, id.into(), volume);
+                }
+            }
+        }
+        // The status byte is the display's.
+        let status = if self.music_until.is_some() {
+            PLAYING
+        } else {
+            STOPPED
+        };
+        self.vp.set_low(MUSIC_PLAY + 1, status);
+    }
+
+    fn play_clip(&mut self, wae: u16, id: u16, volume: u8) {
+        let Some(samples) = self.world.audio.clip(wae, id) else {
+            self.note(format!("no clip {id} in {wae}.wae to play"));
+            return;
+        };
+        self.music_until = Some(self.clock + samples.duration());
+        self.events.push(Event::Sound(Sound::Clip {
+            wae,
+            id,
+            volume,
+            samples,
+        }));
+    }
+
+    /// Sounds the buzzer for `length`.
+    pub(crate) fn beep(&mut self, length: Duration) {
+        self.events.push(Event::Sound(Sound::Beep {
+            length,
+            // A configuration without the block keeps the factory buzzer.
+            buzzer: self.world.config.buzzer.unwrap_or_default(),
+        }));
+    }
+
+    /// Marks the clip stopped once it has played to its end.
+    pub(crate) fn check_music(&mut self) {
+        if let Some(until) = self.music_until
+            && self.clock >= until
+        {
+            self.music_until = None;
+            self.vp.set_low(MUSIC_PLAY + 1, STOPPED);
+        }
     }
 
     /// Rewrites what only the display writes: version, page, backlight,
@@ -136,12 +218,8 @@ impl Sim {
             }
             self.vp.set_high(PIC_SET, 0);
         }
-        if hit((MUSIC_PLAY, 2)) {
-            let words = self.vp.read(MUSIC_PLAY, 2).unwrap_or_default().to_vec();
-            self.note(format!(
-                "sound requested ({:#06X} {:#06X}); audio is not simulated",
-                words[0], words[1]
-            ));
+        if hit((MUSIC_PLAY, 4)) {
+            self.music_command();
         }
 
         for range in READ_ONLY {
@@ -183,6 +261,7 @@ impl Sim {
         self.page = 0;
         self.press = None;
         self.input = None;
+        self.music_until = None;
         self.brightness = self.world.config.brightness.min(100);
         self.auto_upload = self.world.config.auto_upload;
         self.touch_sound = self.world.config.touch_sound;

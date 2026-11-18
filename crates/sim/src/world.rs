@@ -11,6 +11,8 @@ use degus_config::Config;
 use degus_controls::Controls;
 use degus_icl::IclOptions;
 use degus_project::{Diagnostic, Project, Severity, SourceMap, SourceRef};
+
+use crate::audio::{AudioSource, ProjectAudio};
 use image::RgbImage;
 
 /// Why a project could not be loaded.
@@ -72,6 +74,7 @@ pub struct World {
     pub files: Vec<PathBuf>,
     pub pages: Vec<PageInfo>,
     pub icons: Box<dyn IconSource>,
+    pub audio: Box<dyn AudioSource>,
     /// The check's warnings.
     pub warnings: Vec<Diagnostic>,
     /// The project folder, when loaded from one.
@@ -142,6 +145,7 @@ impl World {
             files: project.controls.iter().map(|e| e.path.clone()).collect(),
             pages,
             icons: Box::new(icons),
+            audio: Box::new(ProjectAudio::new(project)),
             warnings: diagnostics,
             root: Some(project.root().to_path_buf()),
         })

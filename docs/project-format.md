@@ -461,11 +461,22 @@ expect 0x1000 1            # VPs hold these words
 expect page 0
 expect upload 0x1000 1     # the oldest auto-upload not yet expected
 expect upload none         # no auto-upload left unexpected
+expect sound clip 3        # the oldest sound not yet expected
+expect sound beep 100ms
+expect sound none
 ```
 
 Numbers are decimal or `0x` hex, and words may be negative, such as `-5`.
 To switch page as the firmware would, write `0x5A01` and the page ID to
 VP `0x0084`: `write 0x0084 0x5A01 3`.
+
+Sounds follow `[config]`. With `audio = "music"`, `write 0x00A0 0x0301`
+plays clip 3 of `music_wae` (`0x0001 0x2000` plays clip 0 at half volume),
+and `0x00A1`'s low byte reads 2 while it plays. With the buzzer, the
+default, `write 0x00A0 0x007D` beeps for 125 × 8 ms, and touch controls
+beep for the buzzer's `time` while `touch_sound` is on. Clips sound as the
+build converts them, 8-bit loss included. Scripts only list the sounds;
+the window plays them.
 
 With `--tcp`, a host program connects and sends `write` and `read` lines.
 The display answers `ack`, `data 0x1000 0x0001` or `error ...`, and sends
@@ -482,8 +493,10 @@ The simulator is a preview, not the panel:
   ignored.
 - Images are the sources, flattened onto white as the build does, without
   JPEG artifacts. Icons key out black backgrounds, not white ones.
-- Audio, standby dimming, rotation, file 22 and description pointers are
-  not simulated.
+- Touch sounds in music mode, which play a control's voice ID, are silent:
+  degus does not build voice IDs yet.
+- Standby dimming, rotation, file 22 and description pointers are not
+  simulated.
 - Where DWIN's guide leaves behaviour open, the simulator guesses; the
   guesses are listed in `crates/sim/ASSUMPTIONS.md` in the repository.
 

@@ -16,12 +16,16 @@
 //! expect page 3
 //! expect upload 0x1000 0x0001  # the oldest upload not yet expected
 //! expect upload none           # no uploads left unexpected
+//! expect sound clip 3          # the oldest sound not yet expected
+//! expect sound beep 100ms
+//! expect sound none
 //! ```
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::audio::Sound;
 use crate::host::{DeviceMsg, HostCmd};
 use crate::sim::{Event, Sim};
 
@@ -42,10 +46,21 @@ pub enum Command {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expectation {
-    Vp { vp: u16, words: Vec<u16> },
+    Vp {
+        vp: u16,
+        words: Vec<u16>,
+    },
     Page(u16),
-    Upload { vp: u16, words: Vec<u16> },
+    Upload {
+        vp: u16,
+        words: Vec<u16>,
+    },
     NoUpload,
+    /// The oldest sound not yet expected is this clip.
+    Clip(u16),
+    /// The oldest sound not yet expected is a beep this long.
+    Beep(Duration),
+    NoSound,
 }
 
 impl Command {
@@ -198,6 +213,12 @@ pub fn parse_line(line: &str) -> Result<Option<Command>, String> {
         "expect" => Command::Expect(match args.as_slice() {
             ["page", page] => Expectation::Page(u16_arg(page)?),
             ["upload", "none"] => Expectation::NoUpload,
+            ["sound", "none"] => Expectation::NoSound,
+            ["sound", "clip", id] => Expectation::Clip(u16_arg(id)?),
+            ["sound", "beep", length] => Expectation::Beep(duration(length)?),
+            ["sound", ..] => {
+                return Err("expect sound takes clip <id>, beep <length> or none".to_owned());
+            }
             ["upload", vp, ..] => Expectation::Upload {
                 vp: u16_arg(vp)?,
                 words: words(2)?,
@@ -233,6 +254,7 @@ pub struct Runner<'a> {
     /// Folder `shot` paths are relative to.
     base: PathBuf,
     uploads: VecDeque<DeviceMsg>,
+    sounds: VecDeque<Sound>,
     log: Box<dyn FnMut(&str) + 'a>,
 }
 
@@ -244,6 +266,7 @@ impl<'a> Runner<'a> {
             sim,
             base: base.as_ref().to_path_buf(),
             uploads: VecDeque::new(),
+            sounds: VecDeque::new(),
             log: Box::new(log),
         }
     }
@@ -347,6 +370,31 @@ impl<'a> Runner<'a> {
                     return Err(format!("{upload} was not expected"));
                 }
             }
+            Expectation::Clip(id) => match self.sounds.pop_front() {
+                Some(Sound::Clip { id: played, .. }) if played == *id => {}
+                Some(sound) => return Err(format!("got {sound}, expected clip {id}")),
+                None => return Err(format!("no sound left, expected clip {id}")),
+            },
+            Expectation::Beep(length) => match self.sounds.pop_front() {
+                Some(Sound::Beep { length: played, .. }) if played == *length => {}
+                Some(sound) => {
+                    return Err(format!(
+                        "got {sound}, expected a {}ms beep",
+                        length.as_millis()
+                    ));
+                }
+                None => {
+                    return Err(format!(
+                        "no sound left, expected a {}ms beep",
+                        length.as_millis()
+                    ));
+                }
+            },
+            Expectation::NoSound => {
+                if let Some(sound) = self.sounds.front() {
+                    return Err(format!("{sound} was not expected"));
+                }
+            }
         }
         Ok(())
     }
@@ -362,6 +410,10 @@ impl<'a> Runner<'a> {
                 Event::Page(page) => (self.log)(&format!("# page {page}")),
                 Event::Reset => (self.log)("# reset"),
                 Event::Note(note) => (self.log)(&format!("# {note}")),
+                Event::Sound(sound) => {
+                    (self.log)(&format!("# sound {sound}"));
+                    self.sounds.push_back(sound);
+                }
             }
         }
     }
@@ -390,6 +442,9 @@ mod tests {
             expect page 3
             expect upload 0x1000 0x0001
             expect upload none
+            expect sound clip 3
+            expect sound beep 1s
+            expect sound none
         ";
         let commands: Vec<Command> = parse(script).unwrap().into_iter().map(|(_, c)| c).collect();
         assert_eq!(
@@ -422,8 +477,12 @@ mod tests {
                     words: vec![1]
                 }),
                 Command::Expect(Expectation::NoUpload),
+                Command::Expect(Expectation::Clip(3)),
+                Command::Expect(Expectation::Beep(Duration::from_secs(1))),
+                Command::Expect(Expectation::NoSound),
             ]
         );
+        assert!(parse_line("expect sound loud").is_err());
     }
 
     #[test]
@@ -452,7 +511,7 @@ mod tests {
             .nth(1)
             .and_then(|rest| rest.split("```").next())
             .unwrap();
-        assert_eq!(parse(example).unwrap().len(), 13);
+        assert_eq!(parse(example).unwrap().len(), 16);
         // The same for the module docs.
         let docs = include_str!("script.rs")
             .split("//! ```text")
@@ -464,6 +523,6 @@ mod tests {
             .map(|line| line.trim_start_matches("//!").trim_start())
             .collect::<Vec<_>>()
             .join("\n");
-        assert_eq!(parse(&docs).unwrap().len(), 13);
+        assert_eq!(parse(&docs).unwrap().len(), 16);
     }
 }

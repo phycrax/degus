@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use degus_controls::{Display, ProgressBar};
 
+use crate::audio::Sound;
 use crate::draw::Rect;
 use crate::host::{DeviceMsg, HostCmd};
 use crate::input::InputSession;
@@ -24,6 +25,8 @@ pub enum Event {
     Reset,
     /// Worth telling the user, such as a system VP that is only stored.
     Note(String),
+    /// Something to play.
+    Sound(Sound),
 }
 
 /// A control's box on the current page, for overlays.
@@ -54,6 +57,10 @@ pub struct Sim {
     pub(crate) generation: u64,
     /// System VPs already reported as not simulated.
     pub(crate) noted: BTreeSet<u16>,
+    /// When the clip playing ends.
+    pub(crate) music_until: Option<Duration>,
+    /// Music-mode touch sounds were reported as missing.
+    pub(crate) voice_noted: bool,
 }
 
 impl Sim {
@@ -73,6 +80,8 @@ impl Sim {
             events: Vec::new(),
             generation: 0,
             noted: BTreeSet::new(),
+            music_until: None,
+            voice_noted: false,
         };
         sim.init_system();
         sim.refresh();
@@ -168,6 +177,7 @@ impl Sim {
     pub fn tick(&mut self, now: Duration) {
         self.clock = self.clock.max(now);
         self.check_hold();
+        self.check_music();
         self.refresh();
     }
 
@@ -303,7 +313,9 @@ impl Sim {
                 self.changed();
             }
         }
-        for problem in self.world.icons.take_problems() {
+        let mut problems = self.world.icons.take_problems();
+        problems.extend(self.world.audio.take_problems());
+        for problem in problems {
             self.note(problem);
         }
     }
