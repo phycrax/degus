@@ -55,10 +55,13 @@ pub fn fill(fb: &mut RgbImage, rect: Rect, color: Rgb<u8>) {
     let Some((xs, ys)) = rect.clip(fb.width(), fb.height()) else {
         return;
     };
+    // One row, then copies of it: fast even unoptimized.
+    let row = color.0.repeat(xs.len());
+    let width = fb.width() as usize;
+    let raw: &mut [u8] = fb.as_mut();
     for y in ys {
-        for x in xs.clone() {
-            fb.put_pixel(x, y, color);
-        }
+        let start = (y as usize * width + xs.start as usize) * 3;
+        raw[start..start + row.len()].copy_from_slice(&row);
     }
 }
 
@@ -105,6 +108,19 @@ pub fn blit(fb: &mut RgbImage, src: &RgbImage, src_rect: Rect, x: i32, y: i32, b
     let Some((xs, ys)) = dst.clip(fb.width(), fb.height()) else {
         return;
     };
+    if blend == Blend::Opaque {
+        // Whole rows at once: page backgrounds are full-screen copies.
+        let (fb_w, src_w) = (fb.width() as usize, src.width() as usize);
+        let len = xs.len() * 3;
+        let sx = (xs.start as i32 - dx) as usize;
+        for ty in ys {
+            let sy = (ty as i32 - dy) as usize;
+            let from = (sy * src_w + sx) * 3;
+            let to = (ty as usize * fb_w + xs.start as usize) * 3;
+            fb.as_mut()[to..to + len].copy_from_slice(&src.as_raw()[from..from + len]);
+        }
+        return;
+    }
     for ty in ys {
         for tx in xs.clone() {
             let s = *src.get_pixel((tx as i32 - dx) as u32, (ty as i32 - dy) as u32);
