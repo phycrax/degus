@@ -57,8 +57,6 @@ Display controls:
   multi-byte encodings. (`text.rs`)
 - Text breaks lines at `\n` as well as at the box's edge.
 
-System variables:
-
 Sound:
 
 - In music mode, a new clip cuts off the one playing: one channel.
@@ -81,6 +79,14 @@ System variables:
 - `0x000E`–`0x000F` read `0000 6322`, the guide's example version.
 - Writes to read-only system VPs are undone.
 
+UART frames:
+
+- A frame the display cannot use, such as one with a wrong CRC, a length
+  too short or an unknown command, gets no answer. (`frames.rs`)
+- Bytes after a read's length are ignored. (`frames.rs`, `dguscard`)
+- A read of more words than one frame holds, 125 or 124 with CRC, gets no
+  answer. (`frames.rs`)
+
 ## Backed by the guide
 
 - Values outside `val_min`–`val_max` show no icon (§7.2).
@@ -99,6 +105,12 @@ System variables:
 - The buzzer's tone is 825.7536 MHz / (`div1` × `div2`) at `duty` / `div2`,
   and a touch beeps for `time` × 10 ms (CFG `0x28`–`0x2D`).
 - A progress bar writes its percentage, 0–100, to its rate VP (§7.23).
+- Frames are `5A A5`, a length byte counting the command, data and CRC,
+  the command and data, and a CRC-16/MODBUS trailer, low byte first, when
+  CFG `0x05` bit 7 is set. `0x82` writes are answered `82 4F 4B`, `0x83`
+  reads with `83`, the address, the word count and the words, and
+  auto-uploads use the same `83` frame (§4.1, §4.2, and `0x000C`'s
+  examples in §5.1).
 
 ## Not simulated
 
@@ -110,6 +122,6 @@ System variables:
   degus does not build, so they are silent.
 - Pausing a clip, standby dimming, rotation, file 22, and description
   pointers (`sp`).
-- DGUS frames on the UART (`5A A5 len cmd data [crc]`). Links speak a
-  text protocol until a frame codec exists, planned as a device side in
-  the `dguscard` crate.
+- The register (`0x80`, `0x81`), curve buffer (`0x84`) and double-word
+  (`0x86`, `0x87`) commands: they are logged and get no answer.
+- `0x000C`'s baud rate and CRC switches: links keep the configured ones.

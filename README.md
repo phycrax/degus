@@ -89,13 +89,17 @@ and images, without building. A script runs headless: VP writes and reads
 as the host, touches, screenshots and expectations, for tests and agents. A
 window (`--features gui`) takes clicks as touches, shows the VPs and logs
 what passes between host and display, and plays the clips and beeps the
-display would; with `--tcp`, a host program drives it with `write` and
-`read` lines.
+display would. With `--tcp`, or `--serial` (`--features serial`), the
+firmware drives it with DGUS frames, as it would the panel's UART2.
 
 It is a preview: fonts are a stand-in, images skip the JPEG round trip, and
 where DWIN's guide is silent the simulator guesses
 ([crates/sim/ASSUMPTIONS.md](crates/sim/ASSUMPTIONS.md)). Check the result
-on the display. DGUS UART frames are not supported yet.
+on the display.
+
+The frames come from [`dguscard`](https://github.com/phycrax/dguscard)'s
+display side, which the workspace takes from a sibling checkout,
+`../dguscard`.
 
 ## Building capabilities
 

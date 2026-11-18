@@ -441,6 +441,7 @@ it reads the images from their source files and checks the project as
 degus sim my-hmi --script steps.txt   # runs a script, no window
 degus sim my-hmi                      # opens a window (needs the gui feature)
 degus sim my-hmi --tcp 127.0.0.1:5000 # window, and a host on TCP
+degus sim my-hmi --serial COM5        # window, and a host on a serial port
 ```
 
 A script drives the display one line at a time and stops at the first
@@ -478,10 +479,20 @@ beep for the buzzer's `time` while `touch_sound` is on. Clips sound as the
 build converts them, 8-bit loss included. Scripts only list the sounds;
 the window plays them.
 
-With `--tcp`, a host program connects and sends `write` and `read` lines.
-The display answers `ack`, `data 0x1000 0x0001` or `error ...`, and sends
-`upload 0x1000 0x0001` when a touch control changes a VP. Raw DGUS frames
-are not supported yet.
+With `--tcp`, a host connects and speaks DGUS frames to the display, as
+the firmware does on the panel's UART2: `5A A5`, a length, the command and
+its data, and a CRC when `crc = true`. `--serial` does the same on a serial
+port at the configured baud rate; it needs the `serial` feature. The
+display answers `0x82` writes with `82 4F 4B` and `0x83` reads with the
+words, and when a touch control changes a VP, it uploads it in an `0x83`
+frame. The register, curve and double-word commands (`0x80`, `0x81`,
+`0x84`, `0x86`, `0x87`) and frames it cannot read, such as one with a wrong
+CRC, get no answer; the window logs them.
+
+With `--protocol lines`, the host sends script lines instead,
+`write 0x1000 1` and `read 0x1000 2`, which is handy from `nc`. The display
+answers `ack`, `data 0x1000 0x0001` or `error ...`, and sends
+`upload 0x1000 0x0001`.
 
 The window shows the screen, which takes clicks as touches, the pages, a
 command box for script lines, VP watches, the VP memory and a log. Its
@@ -496,7 +507,8 @@ The simulator is a preview, not the panel:
 - Touch sounds in music mode, which play a control's voice ID, are silent:
   degus does not build voice IDs yet.
 - Standby dimming, rotation, file 22 and description pointers are not
-  simulated.
+  simulated, and writes to `0x000C` leave the link's baud rate and CRC as
+  configured.
 - Where DWIN's guide leaves behaviour open, the simulator guesses; the
   guesses are listed in `crates/sim/ASSUMPTIONS.md` in the repository.
 
