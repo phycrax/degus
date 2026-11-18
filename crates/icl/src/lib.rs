@@ -23,6 +23,7 @@ mod jpeg;
 mod options;
 
 pub use builder::{BuiltIcl, IclBuilder, IconReport, IconSource};
+pub use encode::flatten;
 pub use error::{Error, JpegError, Result};
 pub use format::{MAGIC, VERSION};
 pub use options::{Chip, FlashSlot, IclOptions, OversizePolicy, Subsampling};

@@ -78,8 +78,10 @@ fn encode_image(image: &DynamicImage, options: &IclOptions, limit: usize) -> Res
     }
 }
 
-/// Returns packed RGB8 pixels, blending any alpha onto `background`.
-fn flatten(image: &DynamicImage, background: [u8; 3]) -> Vec<u8> {
+/// Returns packed RGB8 pixels, blending any alpha onto `background`, as
+/// the build does before encoding: an ICL has no transparency.
+/// [`IclOptions::background`] is the colour the build uses.
+pub fn flatten(image: &DynamicImage, background: [u8; 3]) -> Vec<u8> {
     if !image.color().has_alpha() {
         return image.to_rgb8().into_raw();
     }

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use degus_controls::Controls;
@@ -78,10 +79,27 @@ impl Project {
     /// The controls of every page, ready for `degus-controls` to build.
     /// Entries sharing a page ID are merged; the check reports them.
     pub fn to_controls(&self) -> Controls {
+        self.to_controls_with_sources().0
+    }
+
+    /// Like [`Project::to_controls`], with where each control comes from.
+    pub fn to_controls_with_sources(&self) -> (Controls, SourceMap) {
         let mut controls = Controls::new();
-        for entry in &self.controls {
+        let mut sources = SourceMap::default();
+        for (entry_index, entry) in self.controls.iter().enumerate() {
             let target = controls.page_mut(entry.id);
-            for control in &entry.file.controls {
+            let page_sources = sources.pages.entry(entry.id).or_default();
+            for (index, control) in entry.file.controls.iter().enumerate() {
+                let source = SourceRef {
+                    entry: entry_index,
+                    index,
+                    name: control.name().map(str::to_owned),
+                };
+                if control.is_touch() {
+                    page_sources.touch.push(source);
+                } else {
+                    page_sources.display.push(source);
+                }
                 match control {
                     Control::Button(button) => target.touch.push(button.to_touch()),
                     Control::Key(key) => target.touch.push(key.to_touch()),
@@ -93,8 +111,42 @@ impl Project {
                 }
             }
         }
-        controls
+        (controls, sources)
     }
+}
+
+/// Where each control of [`Project::to_controls_with_sources`] comes from,
+/// page by page.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourceMap {
+    pub pages: BTreeMap<u16, PageSources>,
+}
+
+impl SourceMap {
+    /// The sources of a page's controls, if it has any.
+    pub fn page(&self, id: u16) -> Option<&PageSources> {
+        self.pages.get(&id)
+    }
+}
+
+/// The sources of one page's controls, in the order of its
+/// [`PageControls`](degus_controls::PageControls): `touch[i]` is where
+/// touch control `i` comes from, and the same for `display`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PageSources {
+    pub touch: Vec<SourceRef>,
+    pub display: Vec<SourceRef>,
+}
+
+/// A control in a controls file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceRef {
+    /// Index into [`Project::controls`].
+    pub entry: usize,
+    /// Position of the control in its file, from 0.
+    pub index: usize,
+    /// The control's `name`, if it has one.
+    pub name: Option<String>,
 }
 
 fn read_toml<T: DeserializeOwned>(path: &Path) -> Result<T> {

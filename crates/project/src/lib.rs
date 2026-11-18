@@ -38,4 +38,4 @@ pub use check::{Diagnostic, Severity};
 pub use create::new;
 pub use error::{Error, Result};
 pub use model::PROJECT_FILE_NAME;
-pub use project::{ControlsEntry, Project};
+pub use project::{ControlsEntry, PageSources, Project, SourceMap, SourceRef};

@@ -8,7 +8,7 @@ use degus_controls::{
 };
 use degus_icl::{FlashSlot, IclBuilder, IclOptions, IconSource};
 use degus_project::model::{Color, Size};
-use degus_project::{Error, Project, Severity};
+use degus_project::{Error, Project, Severity, SourceRef};
 use degus_wae::{ClipSource, WaeBuilder, WaeOptions};
 use image::{Rgb, RgbImage};
 
@@ -354,6 +354,39 @@ fn builds_every_library_and_the_controls() {
     assert!(project.clean().unwrap());
     assert!(!dir.join("target").exists());
     assert!(!project.clean().unwrap());
+}
+
+#[test]
+fn maps_each_control_to_its_file_and_position() {
+    let dir = sample_project("sources");
+    let project = Project::load(&dir).unwrap();
+    let (controls, sources) = project.to_controls_with_sources();
+    assert_eq!(controls, project.to_controls());
+
+    let source = |entry, index, name: Option<&str>| SourceRef {
+        entry,
+        index,
+        name: name.map(str::to_owned),
+    };
+    // Touch and display controls are split, each keeping the file's order.
+    let main = sources.page(0).unwrap();
+    assert_eq!(
+        main.display,
+        [
+            source(0, 0, Some("power")),
+            source(0, 1, None),
+            source(0, 2, None),
+            source(0, 3, Some("level")),
+        ]
+    );
+    assert_eq!(
+        main.touch,
+        [source(0, 4, Some("power")), source(0, 5, Some("setpoint"))]
+    );
+    let keyboard = sources.page(1).unwrap();
+    assert_eq!(keyboard.touch, [source(1, 0, None)]);
+    assert!(keyboard.display.is_empty());
+    assert_eq!(sources.page(2), None);
 }
 
 #[test]
