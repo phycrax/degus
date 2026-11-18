@@ -412,16 +412,17 @@ impl App {
     fn pages(&mut self, ui: &mut egui::Ui) {
         ui.heading("Pages");
         let pages = self.sim.world().pages.clone();
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
         egui::ScrollArea::vertical()
             .id_salt("pages")
             .show(ui, |ui| {
                 for page in pages {
                     let current = page.id == self.sim.page();
                     let label = format!("{:>4}  {}", page.id, page.label);
-                    if ui
+                    let response = ui
                         .selectable_label(current, RichText::new(label).monospace())
-                        .clicked()
-                    {
+                        .on_hover_text(&page.label);
+                    if response.clicked() {
                         self.sim.show_page(page.id);
                     }
                 }
@@ -429,9 +430,27 @@ impl App {
     }
 
     fn inspector(&mut self, ui: &mut egui::Ui) {
-        ui.heading("VPs");
+        ui.heading("Command");
+        let response = ui
+            .add(
+                egui::TextEdit::singleline(&mut self.command)
+                    .hint_text("write 0x1000 1")
+                    .desired_width(f32::INFINITY),
+            )
+            .on_hover_text(
+                "As the host: write 0x1000 1, read 0x1000 2\n\
+                 As a finger: touch x y, press x y, move x y, release\n\
+                 page n, shot file.png (in the project folder)",
+            );
+        if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+            self.run_command();
+            response.request_focus();
+        }
+
+        ui.separator();
+        ui.heading("Watches");
         ui.horizontal(|ui| {
-            ui.add(
+            let field = ui.add(
                 egui::TextEdit::singleline(&mut self.new_watch)
                     .hint_text("0x1000")
                     .desired_width(70.0),
@@ -444,8 +463,8 @@ impl App {
                         ui.selectable_value(&mut self.new_kind, kind, kind.name());
                     }
                 });
-            let entered = ui.input(|i| i.key_pressed(Key::Enter));
-            if ui.button("watch").clicked() || entered && !self.new_watch.is_empty() {
+            let entered = field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+            if ui.button("watch").clicked() || entered {
                 let text = self.new_watch.trim();
                 let vp = match text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
                     Some(hex) => u16::from_str_radix(hex, 16).ok(),
@@ -501,7 +520,7 @@ impl App {
 
         ui.separator();
         ui.horizontal(|ui| {
-            ui.label("memory from");
+            ui.heading("Memory");
             ui.add(egui::TextEdit::singleline(&mut self.hex_start).desired_width(70.0));
         });
         let start = self.hex_start.trim();
@@ -509,27 +528,21 @@ impl App {
             .strip_prefix("0x")
             .or_else(|| start.strip_prefix("0X"))
             .and_then(|hex| u16::from_str_radix(hex, 16).ok())
-            .unwrap_or(0x1000);
-        for row in 0..16u16 {
-            let at = start.wrapping_add(row * 8);
-            let words: Vec<String> = (0..8)
-                .map(|i| format!("{:04X}", self.sim.vp().get(at.wrapping_add(i))))
-                .collect();
-            ui.monospace(format!("{at:04X}  {}", words.join(" ")));
-        }
-
-        ui.separator();
-        ui.label("command")
-            .on_hover_text("write 0x1000 1, read 0x1000 2, touch x y, page n, shot file.png");
-        let response = ui.add(
-            egui::TextEdit::singleline(&mut self.command)
-                .hint_text("write 0x1000 1")
-                .desired_width(f32::INFINITY),
-        );
-        if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-            self.run_command();
-            response.request_focus();
-        }
+            .unwrap_or(0x1000)
+            & !7;
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+        egui::ScrollArea::both()
+            .id_salt("memory")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for row in 0..64u16 {
+                    let at = start.wrapping_add(row * 8);
+                    let words: Vec<String> = (0..8)
+                        .map(|i| format!("{:04X}", self.sim.vp().get(at.wrapping_add(i))))
+                        .collect();
+                    ui.monospace(format!("{at:04X}  {}", words.join(" ")));
+                }
+            });
     }
 
     fn log_panel(&mut self, ui: &mut egui::Ui) {
@@ -686,11 +699,11 @@ impl eframe::App for App {
             .show(ui, |ui| self.log_panel(ui));
         egui::Panel::left("pages")
             .resizable(true)
-            .default_size(220.0)
+            .default_size(240.0)
             .show(ui, |ui| self.pages(ui));
         egui::Panel::right("inspector")
             .resizable(true)
-            .default_size(330.0)
+            .default_size(420.0)
             .show(ui, |ui| self.inspector(ui));
         egui::CentralPanel::default().show(ui, |ui| self.screen(ui));
         // Touches and inspector writes made this frame.
