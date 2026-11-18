@@ -246,3 +246,25 @@ fn rejects_bad_input() {
     builder.insert(0, ClipSource::Encoded(b"not audio".to_vec()));
     assert!(matches!(builder.build(), Err(Error::Clip { id: 0, .. })));
 }
+
+#[test]
+fn clip_samples_are_what_the_build_stores() {
+    let source = samples(44_100, &sine(44_100, 440.0, 0.2, 12_000.0));
+    for format in [SampleFormat::Pcm16, SampleFormat::Companded8] {
+        let options = WaeOptions {
+            format,
+            ..WaeOptions::default()
+        };
+        let mut builder = WaeBuilder::new(options.clone());
+        builder.insert(3, source.clone());
+        let bytes = builder.build().unwrap().bytes;
+        let stored = format.decode(clip(&bytes, 3));
+        assert_eq!(degus_wae::clip_samples(&source, &options).unwrap(), stored);
+    }
+    // Raw data is decoded as it is.
+    let raw = ClipSource::Raw(vec![0x01, 0x00, 0xFF, 0xFF]);
+    assert_eq!(
+        degus_wae::clip_samples(&raw, &WaeOptions::default()).unwrap(),
+        [1, -1]
+    );
+}

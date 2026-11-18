@@ -26,7 +26,7 @@ mod error;
 mod format;
 mod options;
 
-pub use builder::{BuiltWae, ClipReport, ClipSource, WaeBuilder};
+pub use builder::{BuiltWae, ClipReport, ClipSource, WaeBuilder, clip_samples};
 pub use codec::SampleFormat;
 pub use error::{Error, Result};
 pub use format::{MAGIC, SAMPLE_RATE, VERSION};

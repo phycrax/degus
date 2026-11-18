@@ -34,6 +34,20 @@ impl SampleFormat {
             SampleFormat::Companded8 => samples.iter().map(|&s| compand(s)).collect(),
         }
     }
+
+    /// Samples back from stored clip data. 12:8 codes expand to the middle
+    /// of their range; how the display expands them is not known.
+    pub fn decode(self, data: &[u8]) -> Vec<i16> {
+        match self {
+            SampleFormat::Pcm16 => data
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|&pair| i16::from_le_bytes(pair))
+                .collect(),
+            SampleFormat::Companded8 => data.iter().map(|&code| expand(code)).collect(),
+        }
+    }
 }
 
 /// Smallest `|sample| >> 4` for each 12:8 magnitude code.
@@ -51,6 +65,21 @@ fn compand(sample: i16) -> u8 {
     let magnitude = sample.unsigned_abs().min(i16::MAX as u16) >> 4;
     let code = COMPAND.partition_point(|&lower| lower <= magnitude) - 1;
     code as u8 | if sample < 0 { 0x80 } else { 0 }
+}
+
+/// The middle of the samples that [`compand`] turns into `code`.
+fn expand(code: u8) -> i16 {
+    let index = usize::from(code & 0x7F);
+    let lower = u32::from(COMPAND[index]) << 4;
+    let upper = COMPAND
+        .get(index + 1)
+        .map_or(0x8000, |&next| u32::from(next) << 4);
+    let magnitude = ((lower + upper) / 2) as i16;
+    if code & 0x80 != 0 {
+        -magnitude
+    } else {
+        magnitude
+    }
 }
 
 #[cfg(test)]
@@ -81,5 +110,18 @@ mod tests {
             SampleFormat::Pcm16.encode(&samples),
             [0x34, 0x12, 0xFE, 0xFF, 0x00, 0x80]
         );
+        let encoded = SampleFormat::Pcm16.encode(&samples);
+        assert_eq!(SampleFormat::Pcm16.decode(&encoded), samples);
+    }
+
+    #[test]
+    fn companded_codes_expand_into_their_own_range() {
+        for code in 0..=u8::MAX {
+            assert_eq!(compand(expand(code)), code, "code {code:#04X}");
+        }
+        assert_eq!(expand(0x00), 8);
+        assert_eq!(expand(0x80), -8);
+        assert_eq!(expand(0x7F), 32760);
+        assert_eq!(SampleFormat::Companded8.decode(&[0x21, 0xA1]), [544, -544]);
     }
 }

@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 use crate::format::{
     CRC_START, ENTRY_LEN, HEADER_LEN, MAGIC, SAMPLE_RATE, VERSION, checksum, round_up_block,
 };
-use crate::options::WaeOptions;
+use crate::options::{Downmix, WaeOptions};
 
 /// Where a clip's audio comes from.
 #[derive(Debug, Clone)]
@@ -122,35 +122,53 @@ impl WaeBuilder {
 
     /// Converts one clip into the builder's sample format.
     fn encode(&self, source: &ClipSource) -> Result<Vec<u8>> {
-        let downmix = self.options.downmix;
-        let decoded = match source {
-            ClipSource::Raw(data) => {
-                if data.is_empty() {
-                    return Err(Error::EmptyAudio);
-                }
-                return Ok(data.clone());
-            }
-            ClipSource::Samples { rate, samples } => audio::Decoded {
-                samples: audio::to_f32(samples),
-                rate: *rate,
-            },
-            ClipSource::File(path) => {
-                let bytes = std::fs::read(path).map_err(|source| Error::Io {
-                    path: path.clone(),
-                    source,
-                })?;
-                let extension = path.extension().and_then(|ext| ext.to_str());
-                audio::decode(bytes, extension, downmix)?
-            }
-            ClipSource::Encoded(bytes) => audio::decode(bytes.clone(), None, downmix)?,
-        };
-        if decoded.samples.is_empty() {
-            return Err(Error::EmptyAudio);
+        match source {
+            ClipSource::Raw(data) if data.is_empty() => Err(Error::EmptyAudio),
+            ClipSource::Raw(data) => Ok(data.clone()),
+            _ => Ok(self
+                .options
+                .format
+                .encode(&convert(source, self.options.downmix)?)),
         }
-        let samples = audio::resample(decoded.samples, decoded.rate, SAMPLE_RATE)?;
-        Ok(self
-            .options
-            .format
-            .encode(&audio::mix_to_i16(&samples, SAMPLE_RATE)))
     }
+}
+
+/// The samples the display plays for `source`: mono 16-bit at
+/// [`SAMPLE_RATE`], converted as the build converts them and passed through
+/// `options.format`, so a [`SampleFormat::Companded8`] clip keeps its loss.
+/// [`ClipSource::Raw`] data is decoded from `options.format`.
+///
+/// [`SampleFormat::Companded8`]: crate::SampleFormat::Companded8
+pub fn clip_samples(source: &ClipSource, options: &WaeOptions) -> Result<Vec<i16>> {
+    let stored = match source {
+        ClipSource::Raw(data) if data.is_empty() => return Err(Error::EmptyAudio),
+        ClipSource::Raw(data) => data.clone(),
+        _ => options.format.encode(&convert(source, options.downmix)?),
+    };
+    Ok(options.format.decode(&stored))
+}
+
+/// Decodes, downmixes and resamples a clip that is not [`ClipSource::Raw`].
+fn convert(source: &ClipSource, downmix: Downmix) -> Result<Vec<i16>> {
+    let decoded = match source {
+        ClipSource::Raw(_) => unreachable!("raw clips are stored as they are"),
+        ClipSource::Samples { rate, samples } => audio::Decoded {
+            samples: audio::to_f32(samples),
+            rate: *rate,
+        },
+        ClipSource::File(path) => {
+            let bytes = std::fs::read(path).map_err(|source| Error::Io {
+                path: path.clone(),
+                source,
+            })?;
+            let extension = path.extension().and_then(|ext| ext.to_str());
+            audio::decode(bytes, extension, downmix)?
+        }
+        ClipSource::Encoded(bytes) => audio::decode(bytes.clone(), None, downmix)?,
+    };
+    if decoded.samples.is_empty() {
+        return Err(Error::EmptyAudio);
+    }
+    let samples = audio::resample(decoded.samples, decoded.rate, SAMPLE_RATE)?;
+    Ok(audio::mix_to_i16(&samples, SAMPLE_RATE))
 }
