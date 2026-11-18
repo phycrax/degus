@@ -45,12 +45,16 @@ icon_max = 1
 cargo install --git https://github.com/phycrax/degus
 ```
 
+For the simulator's window, add `--features gui`; `--features serial` also
+lets a host connect over a serial port.
+
 ## Use
 
 ```sh
 degus new my-hmi --screen 800x480   # creates my-hmi/project.toml
 degus check my-hmi                  # reports problems
 degus build my-hmi                  # writes my-hmi/target/DWIN_SET
+degus sim my-hmi                    # runs it on a simulated display
 degus guide                         # prints the project format
 ```
 
@@ -71,10 +75,24 @@ an agent at your panel, add something like this to your firmware repository's
 editing it and `degus check panel` after each change; `degus build panel`
 writes `panel/target/DWIN_SET`. The panel and the firmware share data only
 through VPs, so keep the firmware's VP addresses in sync with the controls
-files.
+files. To see a change, write a script of VP writes, touches and `shot`
+lines and run `degus sim panel --script <file>`; it saves screenshots and
+fails on unmet `expect` lines.
 ```
 
-degus has no previewing capability yet, check the result on the display.
+## Simulator
+
+`degus sim` runs a project on a simulated display, straight from the TOML
+and images, without building. A script runs headless: VP writes and reads
+as the host, touches, screenshots and expectations, for tests and agents. A
+window (`--features gui`) takes clicks as touches, shows the VPs and logs
+what passes between host and display; with `--tcp`, a host program drives
+it with `write` and `read` lines.
+
+It is a preview: fonts are a stand-in, images skip the JPEG round trip, and
+where DWIN's guide is silent the simulator guesses
+([crates/sim/ASSUMPTIONS.md](crates/sim/ASSUMPTIONS.md)). Check the result
+on the display. DGUS UART frames are not supported yet.
 
 ## Building capabilities
 
@@ -94,6 +112,8 @@ DGUS controls and building fonts are TODO, tokens are welcome.
 |-------|---|
 | `degus` | The command-line tool. |
 | `degus-project` | Loads, checks and builds projects. |
+| `degus-sim` | The display simulator. |
+| `degus-sim-gui` | The simulator's window. |
 | `degus-icl` | ICL image lib builder. |
 | `degus-wae` | WAE audio lib builder. |
 | `degus-controls` | Touch (13) and display (14) controls builder. |

@@ -11,6 +11,7 @@ degus new my-hmi --screen 800x480   # creates my-hmi/project.toml
 degus check my-hmi                  # reports problems, builds nothing
 degus build my-hmi                  # writes my-hmi/target/DWIN_SET
 degus clean my-hmi                  # deletes it
+degus sim my-hmi --script steps.txt # runs it on a simulated display
 degus guide                         # prints this document
 ```
 
@@ -429,3 +430,61 @@ Warnings:
 
 Not checked: overlapping VPs, background image sizes, font files, and
 whether numbers and text fit where they are drawn.
+
+## Simulating
+
+`degus sim` runs the project on a simulated display, without building it:
+it reads the images from their source files and checks the project as
+`degus check` does.
+
+```sh
+degus sim my-hmi --script steps.txt   # runs a script, no window
+degus sim my-hmi                      # opens a window (needs the gui feature)
+degus sim my-hmi --tcp 127.0.0.1:5000 # window, and a host on TCP
+```
+
+A script drives the display one line at a time and stops at the first
+`expect` that fails, with a non-zero exit code. It prints what the host
+sent (`>`), what the display sent (`<`) and what happened (`#`).
+
+```text
+write 0x1001 235           # host writes VPs from 0x1001 on (0x82)
+read 0x1000 2              # host reads 2 VPs (0x83)
+touch 360 230              # press and release at (x, y)
+press 360 230              # press and hold, for a hold_time or the press effect
+move 370 230
+release
+wait 500ms                 # also 1s, 1.5s or plain milliseconds
+page 3                     # shows page 3 directly
+shot shots/home.png        # saves the screen, relative to the script
+expect 0x1000 1            # VPs hold these words
+expect page 0
+expect upload 0x1000 1     # the oldest auto-upload not yet expected
+expect upload none         # no auto-upload left unexpected
+```
+
+Numbers are decimal or `0x` hex, and words may be negative, such as `-5`.
+To switch page as the firmware would, write `0x5A01` and the page ID to
+VP `0x0084`: `write 0x0084 0x5A01 3`.
+
+With `--tcp`, a host program connects and sends `write` and `read` lines.
+The display answers `ack`, `data 0x1000 0x0001` or `error ...`, and sends
+`upload 0x1000 0x0001` when a touch control changes a VP. Raw DGUS frames
+are not supported yet.
+
+The window shows the screen, which takes clicks as touches, the pages, a
+command box for script lines, VP watches, the VP memory and a log. Its
+"outlines" box draws each control's box and names its controls file.
+
+The simulator is a preview, not the panel:
+
+- Fonts are one stand-in font scaled into each character cell; font IDs are
+  ignored.
+- Images are the sources, flattened onto white as the build does, without
+  JPEG artifacts. Icons key out black backgrounds, not white ones.
+- Audio, standby dimming, rotation, file 22 and description pointers are
+  not simulated.
+- Where DWIN's guide leaves behaviour open, the simulator guesses; the
+  guesses are listed in `crates/sim/ASSUMPTIONS.md` in the repository.
+
+Check the result on the display before relying on it.

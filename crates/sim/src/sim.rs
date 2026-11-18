@@ -256,6 +256,8 @@ impl Sim {
         Ok(())
     }
 
+    // ASSUME: an input in progress survives a page switch, so keys on a page
+    // reached through the input's `next_page` still type into it.
     pub(crate) fn set_page(&mut self, page: u16) {
         if !self.world.icons.has_icon(self.background_icl(), page) {
             self.note(format!(

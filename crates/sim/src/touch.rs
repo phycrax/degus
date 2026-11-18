@@ -94,6 +94,7 @@ impl Sim {
             return;
         };
         self.touch_status(LIFT, press.x, press.y);
+        // ASSUME: keys of a popup keyboard switch no page.
         if let Some(target @ Target::Page(_)) = press.target
             && let Some(next) = self.target_touch(target).and_then(|t| t.next_page)
         {

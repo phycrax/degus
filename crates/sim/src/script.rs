@@ -442,4 +442,28 @@ mod tests {
         assert!(parse_line("write 0x1000 -40000").is_err());
         assert!(parse_line("wait soon").is_err());
     }
+
+    #[test]
+    fn parses_the_example_in_the_project_format_guide() {
+        let guide = include_str!("../../../docs/project-format.md");
+        let section = guide.split("## Simulating").nth(1).unwrap();
+        let example = section
+            .split("```text")
+            .nth(1)
+            .and_then(|rest| rest.split("```").next())
+            .unwrap();
+        assert_eq!(parse(example).unwrap().len(), 13);
+        // The same for the module docs.
+        let docs = include_str!("script.rs")
+            .split("//! ```text")
+            .nth(1)
+            .unwrap();
+        let docs: String = docs
+            .lines()
+            .take_while(|line| !line.starts_with("//! ```"))
+            .map(|line| line.trim_start_matches("//!").trim_start())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(parse(&docs).unwrap().len(), 13);
+    }
 }
