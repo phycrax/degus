@@ -97,9 +97,8 @@ where DWIN's guide is silent the simulator guesses
 ([crates/sim/ASSUMPTIONS.md](crates/sim/ASSUMPTIONS.md)). Check the result
 on the display.
 
-The frames come from [`dguscard`](https://github.com/phycrax/dguscard)'s
-display side, which the workspace takes from a sibling checkout,
-`../dguscard`.
+The frames come from `degus-codec`, which firmware can use for the host's
+side of the link.
 
 ## Building capabilities
 
@@ -125,5 +124,6 @@ DGUS controls and building fonts are TODO, tokens are welcome.
 | `degus-wae` | WAE audio lib builder. |
 | `degus-controls` | Touch (13) and display (14) controls builder. |
 | `degus-config` | `T5LCFG.CFG`. |
+| `degus-codec` | UART frames, for either end of the link. `no_std`. |
 
 degus is an independent project, not affiliated with DWIN Technology.

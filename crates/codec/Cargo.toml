@@ -1,0 +1,18 @@
+[package]
+name = "degus-codec"
+version.workspace = true
+edition.workspace = true
+description = "Builds and parses the UART frames of DWIN T5L displays"
+categories = ["embedded", "no-std", "encoding"]
+
+[dependencies]
+crc = "3.4.0"
+defmt = { version = "1.0.1", optional = true }
+thiserror = { version = "2.0.21", default-features = false }
+
+[dev-dependencies]
+hex-literal = "1.1.0"
+
+[features]
+## Derives `defmt::Format` for the public types.
+defmt = ["dep:defmt"]
