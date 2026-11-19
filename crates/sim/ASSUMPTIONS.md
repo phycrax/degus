@@ -83,7 +83,7 @@ UART frames:
 
 - A frame the display cannot use, such as one with a wrong CRC, a length
   too short or an unknown command, gets no answer. (`frames.rs`)
-- Bytes after a read's length are ignored. (`frames.rs`, `dguscard`)
+- Bytes after a read's length are ignored. (`frames.rs`, `degus-codec`)
 - A read of more words than one frame holds, 125 or 124 with CRC, gets no
   answer. (`frames.rs`)
 

@@ -1,5 +1,5 @@
 //! DGUS frames, as the panel speaks them on UART2: `5A A5 len cmd data [crc]`,
-//! parsed and built by the `dguscard` crate's display side.
+//! parsed and built by `degus-codec`.
 //!
 //! The simulator answers `0x82` writes and `0x83` reads of the VP space. The
 //! other commands, `0x80`/`0x81` registers, the `0x84` curve buffer and
@@ -7,21 +7,16 @@
 
 use std::fmt;
 
-use dguscard::device::{Ack, ArrayAccumulator, Data, FeedResult, Request, Response};
-use dguscard::response::Error;
-use dguscard::{Address, Crc};
+use degus_codec::{
+    Accumulator, Address, Crc, DecodeError, Feed, MAX_CONTENT, MAX_FRAME, Request, Response, Space,
+};
 
 use crate::host::{Codec, Decoded, DeviceMsg, HostCmd};
-
-/// The most a frame's length byte describes: command, data and CRC.
-const MAX_CONTENT: usize = u8::MAX as usize;
-/// The header and the length byte.
-const OVERHEAD: usize = 3;
 
 /// DGUS frames. See the [module docs](self).
 pub struct FrameCodec {
     crc: bool,
-    acc: ArrayAccumulator<MAX_CONTENT>,
+    acc: Accumulator<[u8; MAX_CONTENT]>,
     /// Bytes dropped while looking for a header, not reported yet.
     skipped: usize,
 }
@@ -32,7 +27,7 @@ impl FrameCodec {
     pub fn new(crc: bool) -> Self {
         Self {
             crc,
-            acc: ArrayAccumulator::new(checksum(crc)),
+            acc: Accumulator::new([0; MAX_CONTENT], checksum(crc)),
             skipped: 0,
         }
     }
@@ -61,19 +56,22 @@ impl Codec for FrameCodec {
         let mut input = bytes;
         while !input.is_empty() {
             let (decoded, rest) = match self.acc.feed(input) {
-                FeedResult::Consumed => break,
+                Feed::Consumed => break,
                 // Noise between frames, reported once it ends.
-                FeedResult::Error(Error::BadHeader, rest) => {
+                Feed::Error(DecodeError::BadHeader, rest) => {
                     self.skipped += input.len() - rest.len();
                     input = rest;
                     continue;
                 }
                 // ASSUME: the display drops a frame it cannot use without
                 // an answer.
-                FeedResult::Error(error, rest) => (Decoded::Error(dropped(error, self.crc)), rest),
+                Feed::Error(error, rest) => (Decoded::Error(dropped(error, self.crc)), rest),
                 // ASSUME: bytes after a read's length are ignored, as
-                // `dguscard` parses it.
-                FeedResult::Success(request, rest) => (command(request), rest),
+                // `degus-codec` reads it.
+                Feed::Frame(content, rest) => match Request::from_content(content) {
+                    Ok(request) => (command(request), rest),
+                    Err(error) => (Decoded::Error(dropped(error, self.crc)), rest),
+                },
             };
             report_skipped(&mut self.skipped, out);
             out.push(decoded);
@@ -83,27 +81,27 @@ impl Codec for FrameCodec {
     }
 
     fn encode(&mut self, msg: &DeviceMsg, out: &mut Vec<u8>) -> Result<(), String> {
-        let mut buf = [0u8; OVERHEAD + MAX_CONTENT];
+        let mut buf = [0u8; MAX_FRAME];
         let crc = checksum(self.crc);
         let frame = match msg {
-            DeviceMsg::Ack => Response::with_slice(&mut buf, Address::Word(0), Ack, crc)
-                .and_then(|response| response.finalize()),
+            DeviceMsg::Ack => Response::Ack(Space::Vp).encode(&mut buf, crc),
             DeviceMsg::ReadReply { vp, data } | DeviceMsg::Upload { vp, data } => {
                 // ASSUME: a read of more words than one frame holds gets no
                 // answer. The guide allows reads of 1-125 words.
                 let max = self.max_words();
-                if data.len() > max {
+                let Some(len) = u8::try_from(data.len()).ok().filter(|_| data.len() <= max) else {
                     let with = if self.crc { " with CRC" } else { "" };
                     return Err(format!(
                         "{} words do not fit in one frame; {max} do{with}",
                         data.len()
                     ));
-                }
-                Response::with_slice(&mut buf, Address::Word(*vp), Data(data.len() as u8), crc)
-                    .and_then(|mut response| {
-                        response.push(data.as_slice())?;
-                        response.finalize()
-                    })
+                };
+                Response::begin_data(&mut buf, Address::Vp(*vp), len, crc).and_then(|mut writer| {
+                    for word in data {
+                        writer.push(&word.to_be_bytes())?;
+                    }
+                    Ok(writer.finish())
+                })
             }
         };
         out.extend_from_slice(frame.map_err(|e| e.to_string())?);
@@ -111,7 +109,7 @@ impl Codec for FrameCodec {
     }
 
     fn reset(&mut self) {
-        self.acc = ArrayAccumulator::new(checksum(self.crc));
+        self.acc.reset();
         self.skipped = 0;
     }
 }
@@ -120,34 +118,60 @@ impl Codec for FrameCodec {
 /// the rest is reported.
 fn command(request: Request<'_>) -> Decoded {
     let what = match request {
-        Request::Write(Address::Word(vp), payload) => {
+        Request::Write {
+            addr: Address::Vp(vp),
+            data,
+        } => {
             return Decoded::Cmd(HostCmd::WriteVp {
                 vp,
-                data: payload.as_bytes().to_vec(),
+                data: data.to_vec(),
             });
         }
-        Request::Read(Address::Word(vp), words) => {
-            return Decoded::Cmd(HostCmd::ReadVp { vp, words });
+        Request::Read {
+            addr: Address::Vp(vp),
+            len,
+        } => {
+            return Decoded::Cmd(HostCmd::ReadVp { vp, words: len });
         }
-        Request::Write(Address::Register(..), _) => "0x80 register write",
-        Request::Read(Address::Register(..), _) => "0x81 register read",
-        Request::Write(Address::Curve(_), _) => "0x84 curve buffer write",
-        Request::Read(Address::Curve(_), _) => "0x85 curve buffer read",
-        Request::Write(Address::Dword(_), _) => "0x86 double-word write",
-        Request::Read(Address::Dword(_), _) => "0x87 double-word read",
+        Request::Write {
+            addr: Address::Register { .. },
+            ..
+        } => "0x80 register write",
+        Request::Read {
+            addr: Address::Register { .. },
+            ..
+        } => "0x81 register read",
+        Request::Write {
+            addr: Address::Curve(_),
+            ..
+        } => "0x84 curve buffer write",
+        Request::Read {
+            addr: Address::Curve(_),
+            ..
+        } => "0x85 curve buffer read",
+        Request::Write {
+            addr: Address::Dword(_),
+            ..
+        } => "0x86 double-word write",
+        Request::Read {
+            addr: Address::Dword(_),
+            ..
+        } => "0x87 double-word read",
     };
     Decoded::Error(format!("{what}: not simulated, so not answered"))
 }
 
 /// Why a frame was dropped. A CRC that is on at one end only shows up as a
 /// bad CRC or a short frame, so those name the setting.
-fn dropped(error: Error, crc: bool) -> String {
+fn dropped(error: DecodeError, crc: bool) -> String {
     let setting = if crc { "crc = true" } else { "crc = false" };
     let why = match error {
-        Error::BadCrc => format!("its CRC does not match ({setting} in [config])"),
-        Error::BadLen => format!("its length is too short for a frame ({setting} in [config])"),
-        Error::UnknownCmd => "its command is unknown".to_owned(),
-        Error::UnexpectedEnd => "it ends before its address or length".to_owned(),
+        DecodeError::BadCrc => format!("its CRC does not match ({setting} in [config])"),
+        DecodeError::BadLength => {
+            format!("its length is too short for a frame ({setting} in [config])")
+        }
+        DecodeError::UnknownCommand => "its command is unknown".to_owned(),
+        DecodeError::Truncated => "it ends before its address or length".to_owned(),
         other => other.to_string(),
     };
     format!("frame dropped: {why}")
@@ -300,7 +324,7 @@ mod tests {
         let mut out = Vec::new();
         let mut codec = FrameCodec::new(false);
         codec.encode(&reply(125), &mut out).unwrap();
-        assert_eq!(out.len(), OVERHEAD + MAX_CONTENT - 1);
+        assert_eq!(out.len(), MAX_FRAME - 1);
         assert!(codec.encode(&reply(126), &mut Vec::new()).is_err());
 
         let mut codec = FrameCodec::new(true);
