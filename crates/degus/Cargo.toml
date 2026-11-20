@@ -9,3 +9,4 @@ degus-config.workspace = true
 degus-controls.workspace = true
 degus-icl.workspace = true
 degus-wae.workspace = true
+thiserror = "2.0.21"
