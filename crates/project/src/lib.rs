@@ -29,8 +29,10 @@ mod check;
 mod create;
 mod error;
 mod id;
+pub mod layout;
 pub mod model;
 mod project;
+mod resolve;
 mod sources;
 
 pub use build::{BuildReport, BuiltFile, DWIN_SET, SLOT_SIZE};
@@ -38,4 +40,4 @@ pub use check::{Diagnostic, Severity};
 pub use create::new;
 pub use error::{Error, Result};
 pub use model::PROJECT_FILE_NAME;
-pub use project::{PageSources, Project, ProjectFile, SourceMap, SourceRef};
+pub use project::{GroupPlace, PageSources, Project, ProjectFile, SourceMap, SourceRef};

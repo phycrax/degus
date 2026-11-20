@@ -378,6 +378,7 @@ fn maps_each_control_to_its_file_and_name() {
     let source = |file, name: &str| SourceRef {
         file,
         name: name.to_owned(),
+        group: None,
     };
     // Touch and display controls are split, each keeping the page's order.
     let main = sources.page(0).unwrap();
@@ -808,10 +809,13 @@ fn rejects_unknown_fields_with_their_place() {
         dir.join("controls/main.toml"),
         MAIN_PAGE.replace("icon_max = 10101", "icon_max = 10101\nicon_mx = 3"),
     );
+    // Controls take their styles before they are read, so the error names
+    // the control's table rather than a line.
     let error = Project::load(&dir).unwrap_err().to_string();
-    assert!(error.contains("main.toml"), "{error}");
-    assert!(error.contains("unknown field `icon_mx`"), "{error}");
-    assert!(error.contains("line 2"), "{error}");
+    assert!(
+        error.starts_with("controls/main.toml: [control.power]: unknown field `icon_mx`"),
+        "{error}"
+    );
 
     // A page's ID belongs in its [page.<name>] table.
     write(dir.join("controls/main.toml"), "id = 0\n");

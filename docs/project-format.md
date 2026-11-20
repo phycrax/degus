@@ -133,6 +133,8 @@ the firmware, and the display reports each write over the UART.
 - TOML puts every key after a table header such as `[config]` or
   `[page.home]` into that table, so plain keys like `include` and `copy` go
   first in their file.
+- TOML keeps no order among a table's keys, so whatever has an order is a
+  list: a page's controls, a struct's fields, a group's controls.
 
 ## Files and declarations
 
@@ -145,7 +147,10 @@ Every file, `project.toml` too, declares any of these:
 | Declaration | Meaning |
 |-------------|---------|
 | `[page.<name>]` | A page. |
+| `[struct.<name>]` | VPs laid out as the firmware sees them. |
+| `[group.<name>]` | Controls placed together, once for each element of a struct. |
 | `[control.<name>]` | A control. |
+| `[style.<name>]` | Keys controls share. |
 | `[[icl]]` | An image library. |
 | `[[wae]]` | An audio library. |
 | `copy` | Files copied into `DWIN_SET` unchanged, such as fonts. |
@@ -176,11 +181,12 @@ controls = ["clock", "setpoint", "back"]
 ...
 ```
 
-A name is lowercase letters, digits and `_`, starting with a letter, and
-names one page or one control across all the files; a page and a control
-may share a name. Pages list controls by name, controls name pages, and
-check messages name both as their tables: `pages/home.toml:
-[control.fan_on]`.
+A name is lowercase letters, digits and `_`, starting with a letter. Each
+names one thing across all the files, in four sets: pages, structs, styles,
+and the controls and groups that pages list. Names in different sets may
+match. Check messages name declarations as their tables:
+`pages/home.toml: [control.fan_on]`, or `pages/logs.toml: [group.log_row]
+control 2 (log_row[3])` for a control in a group's copy.
 
 ## `project.toml`
 
@@ -265,6 +271,123 @@ declared like any other, without controls:
 id = 2
 ```
 
+## Structs
+
+A `[struct.<name>]` table lays out VPs the way the firmware sees them: its
+fields follow each other from `vp`, word by word. Controls then name a
+field instead of a VP, and the field gives what the control would otherwise
+be told, such as a data control's type or a text's length.
+
+```toml
+# The page's values, from 0x1C00, and the words its buttons write.
+[struct.logs]
+vp = 0x1C00
+fields = [
+    { name = "page", type = "u16" },                        # 0x1C00
+    { name = "pages", type = "u16" },                       # 0x1C01
+    { name = "older_off", type = "bool" },                  # 0x1C02
+    { name = "open", type = "u16", at = 0xFD },             # 0x1CFD
+    { name = "event", type = "enum", variants = ["newer", "older"], at = 0xFF },
+]
+
+# Ten rows, 0x30 words apart.
+[struct.log_row]
+vp = 0x2000
+count = 10
+stride = 0x30
+fields = [
+    { name = "date", type = "text", length = 16 },          # 8 words
+    { name = "code", type = "text", length = 4 },           # +0x08
+    { name = "details", type = "text", length = 44 },       # +0x0A
+]
+```
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `vp` | required | VP of the first field. |
+| `fields` | required | `{ name, type }` each, in order, with `length` for text, `variants` for an enum and `at` to place a field. |
+| `count` | `1` | Elements of an array. |
+| `stride` | the element's size | Words from one element to the next. |
+
+| Field `type` | Words | |
+|--------------|-------|---|
+| `u16`, `i16` | 1 | |
+| `bool` | 1 | 0 or 1. |
+| `enum` | 1 | The index of one of `variants`, from 0. Controls name the values. |
+| `u32`, `i32`, `f32` | 2 | |
+| `i64`, `f64` | 4 | |
+| `text` | `length` / 2, rounded up | `length` bytes. |
+
+`at` is the field's offset in words from the start of the element; the
+fields after it follow it. Structs may not share a VP. A control names a
+field as `logs.page`, an array's as `log_row[3].date`, or, in a group bound
+to the struct, plainly as `date`.
+
+## Groups
+
+A `[group.<name>]` table places controls together, relative to `origin`,
+and pages list the group by name like a control. Bound to an array, the
+group is drawn once for each element, moved by `step` each time, and its
+controls name the element's fields without the struct:
+
+```toml
+[group.log_row]
+struct = "log_row"
+origin = { x = 80, y = 200 }
+step = { y = 68 }                   # each row 68 pixels below the last
+
+[[group.log_row.control]]
+type = "text"
+field = "date"                      # 0x2000, 0x2030, 0x2060, ...
+area = { x = 32, y = 14, w = 256, h = 32 }
+
+[[group.log_row.control]]
+type = "button"
+field = "logs.open"                 # a word outside the rows
+value = "index"                     # each row writes its own index
+area = { x = 0, y = 0, w = 1760, h = 60 }
+
+[page.logs]
+id = 12
+controls = ["back", "log_row"]
+```
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `struct` | none | The struct whose elements the group draws. |
+| `origin` | `{ x = 0, y = 0 }` | Where `(0, 0)` of the controls is on the screen. |
+| `step` | `{ x = 0, y = 0 }` | How far each element's copy moves from the one before; may be negative. |
+| `[[group.<name>.control]]` | none | The controls, in drawing order. They have no names. |
+
+The origin moves each control's `area` and `position`, and an input's
+keyboard `position`, but not the keyboard's `area`, which is on the
+keyboard page. `value = "index"` writes the element the copy draws, from
+0. The check reports what a group's controls name once, and where they are
+for every copy.
+
+## Styles
+
+A `[style.<name>]` table holds keys that controls share. A control with
+`style = "<name>"` takes the style's keys, then its own, which win. A style
+may hold any key of a control, `type` too, but not `style`.
+
+```toml
+[style.row_text]
+type = "text"
+color = "#4A5462"
+font_width = 16
+font_height = 32
+
+[[group.log_row.control]]
+style = "row_text"
+field = "code"
+area = { x = 400, y = 14, w = 64, h = 32 }
+```
+
+A control is read once its style is applied, so a control that does not
+parse, or names a style no file declares, stops `degus check` naming the
+control's table, not a line.
+
 ## Libraries
 
 ### `[[icl]]`: images
@@ -294,7 +417,14 @@ Clips are converted to 32 kHz mono, the only rate the display plays.
 ## Controls
 
 A `[control.<name>]` table declares a control, picked by its `type`. The
-order of the tables means nothing: a page's list is its drawing order.
+order of the tables means nothing: a page's list is its drawing order. A
+group's controls are `[[group.<name>.control]]` tables, the same but
+unnamed and in drawing order.
+
+Every control but `key` names its VP as `vp`, or as a struct's `field`,
+which also gives what the tables below mark as from the field: a data
+control's `data_type`, a text's `length`, an icon's values. A control with
+a field leaves those keys out.
 
 Touch controls (`button`, `key`, `input`) also take:
 
@@ -311,12 +441,12 @@ also take `popup_menu` (`false`).
 
 ### `button`
 
-Writes `value` to `vp` when pressed (DGUS: "Return key code").
+Writes `value` to its VP when pressed (DGUS: "Return key code").
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `vp` | required | |
-| `value` | required | |
+| `vp` or `field` | required | A one-word field. |
+| `value` | required | A number; a variant's name, with an enum field; or `"index"`, the element a group's copy draws. |
 | `target` | `"word"` | Part of the VP written: `"word"`, `"high_byte"`, `"low_byte"` or `{ bit = 0..15 }`. |
 | `hold_time` | `0` | In 0.1 s units. |
 | `upload` | `true` | Report the write over the UART. |
@@ -324,7 +454,7 @@ Writes `value` to `vp` when pressed (DGUS: "Return key code").
 ### `input`
 
 Pressing `area` starts typing a number, edited with `key` controls; enter
-writes it to `vp` (DGUS: "Data input").
+writes it to its VP (DGUS: "Data input").
 
 ```toml
 [control.setpoint]
@@ -340,9 +470,9 @@ keyboard = { page = "keypad", area = { x = 0, y = 0, w = 300, h = 200 }, positio
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `vp` | required | VP the number is written to. |
+| `vp` or `field` | required | Where the number is written: a `u16`, `i16`, `u32`, `i32`, `i64` or `f32` field. |
 | `position` | required | `{ x, y }` of the cursor. The number is drawn leftward from it, so put it at the right of the field. |
-| `data_type` | `"i16"` | `"i16"`, `"i32"`, `"i64"`, `"float"`, `"high_byte"` or `"low_byte"`. |
+| `data_type` | `"i16"`, or from the field | `"i16"`, `"i32"`, `"i64"`, `"float"`, `"high_byte"` or `"low_byte"`. |
 | `integer_digits` | `8` | |
 | `decimal_digits` | `0` | |
 | `limits` | none | `{ min, max }`; numbers outside are rejected. The bounds ignore the decimal point: with 1 decimal digit, `1000` means 100.0. |
@@ -373,12 +503,14 @@ value is between `val_min` and `val_max` (DGUS: "Variable icon").
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `vp` | required | |
+| `vp` or `field` | required | A one-word field. |
 | `position` | required | `{ x, y }` of the image's top left corner. |
 | `icon_lib` | `0` | ICL ID. `0` is the active background ICL. |
-| `val_min` | `0` | Value that shows `icon_min`. |
-| `val_max` | required | Value that shows `icon_max`. |
-| `icon_min`, `icon_max` | required | Image IDs. |
+| `val_min` | `0` | Value that shows `icon_min`: a number, or a variant of an enum field. |
+| `val_max` | an enum field's last variant | Value that shows the last icon; required without an enum field. |
+| `when` | none | One value, shown as `icon_min` and nothing else: sets `val_min` and `val_max` both. |
+| `icon_min` | required | Image ID. |
+| `icon_max` | as many icons as values | Image ID. |
 | `show_background` | `false` | Draw the image's background instead of keying it out. |
 | `layer_mode` | `"overlay"` | `"overlay"`, `"overlay_mode1"` or `"overlay_mode2"`. |
 | `icon_brightness`, `background_brightness` | `0` | 0–255. |
@@ -388,15 +520,32 @@ With `icon_lib = 0`, images come from the background ICL in use, which
 system variable 0xDE can switch. Keep images with text under the same IDs
 in each language's background ICL, and they switch with the pages.
 
+On an enum field, an icon shows each value in turn, or, with `when`, one:
+
+```toml
+[control.mode]
+type = "icon"
+field = "status.mode"     # variants = ["off", "heat", "cool"]: icons 10, 11, 12
+position = { x = 100, y = 200 }
+icon_min = 10
+
+[control.heating]
+type = "icon"
+field = "status.mode"
+when = "heat"             # icon 20 while heating, nothing otherwise
+position = { x = 160, y = 200 }
+icon_min = 20
+```
+
 ### `data`
 
 Shows the VP as a number (DGUS: "Data variable").
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `vp` | required | |
+| `vp` or `field` | required | Any field but text; a `bool` or an enum shows as `u16`. |
 | `position` | required | `{ x, y }` |
-| `data_type` | `"i16"` | `"i16"`, `"u16"`, `"i32"`, `"u32"`, `"i64"`, `"f32"`, `"f64"`, `"high_byte"` or `"low_byte"`. |
+| `data_type` | `"i16"`, or from the field | `"i16"`, `"u16"`, `"i32"`, `"u32"`, `"i64"`, `"f32"`, `"f64"`, `"high_byte"` or `"low_byte"`. |
 | `integer_digits` | `2` | |
 | `decimal_digits` | `0` | Places the decimal point: with 1, the value 235 shows 23.5. |
 | `align` | `"left"` | `"left"`, `"right"` or `"center"`, around `position`. |
@@ -409,13 +558,13 @@ Shows the VP as a number (DGUS: "Data variable").
 
 ### `text`
 
-Shows text stored from `vp` on, inside `area` (DGUS: "Text display").
+Shows text stored from its VP on, inside `area` (DGUS: "Text display").
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `vp` | required | First VP of the text. |
+| `vp` or `field` | required | First VP of the text, or a text field. |
 | `area` | required | `{ x, y, w, h }` |
-| `length` | `2` | Most bytes shown. |
+| `length` | `2`, or from the field | Most bytes shown. |
 | `encoding` | `"ascii"` | `"ascii"`, `"gb2312"`, `"gbk"`, `"big5"`, `"shift_jis"` or `"unicode"` (UTF-16 big-endian). |
 | `font` | `0` | Font ID. |
 | `ascii_font` | `0` | Font for ASCII characters in the multi-byte encodings. |
@@ -433,11 +582,11 @@ Fills `area` in proportion to the VP value between `val_min` and `val_max`
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `vp` | required | |
+| `vp` or `field` | required | A `u16` or `i16` field. |
 | `area` | required | `{ x, y, w, h }` |
 | `val_min` | `0` | Value of an empty bar, signed 16-bit. |
 | `val_max` | required | Value of a full bar. |
-| `data_type` | `"i16"` | `"i16"`, `"high_byte"` or `"low_byte"`. |
+| `data_type` | `"i16"`, or `"i16"` from the field | `"i16"`, `"high_byte"` or `"low_byte"`. |
 | `direction` | `"right"` | Direction the bar grows: `"right"`, `"left"`, `"up"` or `"down"`. |
 | `bar_color` | `"#000000"` | The filled part. |
 | `background_color` | `"#000000"` | The empty part, drawn when `fill_background` is set. |
@@ -457,10 +606,12 @@ Each VP is one 16-bit word, and many values take more than one:
 | `text` | `length` / 2, rounded up |
 | `sp` | 10 for `icon`, 13 for `data`, `text` and `progress` |
 
-The check does not catch overlapping VPs, so give each value its own range.
-DWIN suggests VPs in 0x1000–0x7FFF and description pointers in
-0x8000–0xFFFF. Controls may share a VP on purpose, as the button and the
-icon do in the small project above.
+Declare the values as structs and the layout is worked out for you, and
+the check reports structs that overlap. VPs written as `vp` are not
+checked, so give each value its own range. DWIN suggests VPs in
+0x1000–0x7FFF and description pointers in 0x8000–0xFFFF. Controls may
+share a VP on purpose, as the button and the icon do in the small project
+above.
 
 ## What `degus check` reports
 
@@ -474,8 +625,14 @@ Errors:
 - IDs used twice: images in an ICL, clips in a WAE, page IDs, and file
   numbers (13 and 14 are taken);
 - files included twice, names declared twice, names that are not lowercase
-  letters, digits and `_`, and names of pages or controls that nothing
-  declares;
+  letters, digits and `_`, a group named like a control, and names of
+  pages, controls, groups, structs, styles or fields that nothing declares;
+- struct fields that overlap, text fields without a length, enum fields
+  without variants, a `stride` smaller than the element, structs past VP
+  0xFFFF, and structs that share a VP;
+- controls with both `vp` and `field` or neither, fields of a type the
+  control cannot show, keys the field already gives, values that are not a
+  variant of the field, and `"index"` outside a group bound to a struct;
 - a `background_icl` that is not a declared `[[icl]]`;
 - `[config]` values out of range, and a `baud` the UART cannot reach;
 - copied files named like a generated file, or a second `T5LCFG*.CFG`;
@@ -493,7 +650,8 @@ Errors:
 Warnings:
 
 - pages without a background image, when `background_icl` is set;
-- controls no page lists, and a control a page lists twice;
+- controls and groups no page lists, groups without controls, and a
+  control a page lists twice;
 - `pressed_page` pages without a background image;
 - inputs whose keyboard page has no `key` controls;
 - `icon` value and image ranges of different lengths;
@@ -502,8 +660,8 @@ Warnings:
 - a `[config.lcd]` whose size, turned by `rotation`, is not `screen`;
 - `sd_folder`, which renames the download folder for good.
 
-Not checked: overlapping VPs, background image sizes, font files, and
-whether numbers and text fit where they are drawn.
+Not checked: overlapping VPs written as `vp`, background image sizes, font
+files, and whether numbers and text fit where they are drawn.
 
 ## Simulating
 

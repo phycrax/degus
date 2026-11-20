@@ -19,6 +19,10 @@ pub enum Error {
         #[source]
         source: toml::de::Error,
     },
+    /// A control that does not parse once its style is applied, or names a
+    /// style no file declares.
+    #[error("{location}: {message}")]
+    Declaration { location: String, message: String },
     /// The check found errors. Holds every diagnostic, warnings included.
     #[error(
         "the project has {} error(s)",

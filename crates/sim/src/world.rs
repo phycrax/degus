@@ -149,13 +149,14 @@ impl World {
     }
 
     /// Where a control comes from, such as `controls/home.toml:
-    /// [control.fan_on]`, as the check's messages name it.
+    /// [control.fan_on]` or `pages/logs.toml: [group.log_row] control 2
+    /// (log_row[3])`, as the check's messages name it.
     pub fn describe(&self, source: &SourceRef) -> String {
-        let file = self
+        let path = self
             .files
             .get(source.file)
-            .map_or_else(|| "?".to_owned(), |path| path.display().to_string());
-        format!("{file}: [control.{}]", source.name)
+            .map_or(Path::new("?"), PathBuf::as_path);
+        source.location(path)
     }
 }
 

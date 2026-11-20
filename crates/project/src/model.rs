@@ -1,7 +1,11 @@
 //! The project description. `project.toml` holds the settings of the whole
 //! project and includes other files; every file, `project.toml` too, holds
-//! declarations: pages, controls, libraries and files to copy. Which file a
-//! declaration is in means nothing to the build.
+//! declarations: pages, structs, groups, controls, styles, libraries and
+//! files to copy. Which file a declaration is in means nothing to the build.
+//!
+//! A struct lays out VPs the way the firmware sees them; controls bind its
+//! fields by name, and groups place controls relative to an origin, once for
+//! each element of the struct they bind.
 //!
 //! Field names follow `degus-controls`. Geometry is written as `x, y, w, h`
 //! instead of the files' start and end corners.
@@ -15,9 +19,8 @@ use degus_config::{
     TouchPanel,
 };
 use degus_controls::{
-    Align, Area, BarDataType, BarDirection, CursorColor, DataInput, DataType, DataVar, Display,
-    Encoding, IconVar, InputDataType, KeyCode, KeyTarget, Keyboard, LayerMode, Point, ProgressBar,
-    TextAlign, TextVar, Touch, TouchAction, VerticalAlign,
+    Align, BarDataType, BarDirection, CursorColor, DataInput, DataType, DataVar, Encoding, IconVar,
+    InputDataType, KeyTarget, LayerMode, TextAlign, TextVar, VerticalAlign,
 };
 use degus_icl::{Chip, IclOptions, Subsampling};
 use degus_wae::{Downmix, SampleFormat};
@@ -26,19 +29,65 @@ use serde::{Deserialize, Deserializer, de};
 /// Name of the project file in a project folder.
 pub const PROJECT_FILE_NAME: &str = "project.toml";
 
-/// `project.toml`: the [`Settings`], then [`Declarations`] like any file.
-/// [`RootFile::split`] separates them.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+/// `project.toml` as written: the [`Settings`], then the declarations of any
+/// file.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RootFile {
-    pub screen: Size,
+pub(crate) struct RootFile {
+    screen: Size,
     #[serde(default)]
-    pub chip: ChipKind,
+    chip: ChipKind,
     #[serde(default = "default_output")]
-    pub output: PathBuf,
+    output: PathBuf,
     #[serde(default)]
-    pub include: Vec<PathBuf>,
-    pub config: Option<ConfigSpec>,
+    include: Vec<PathBuf>,
+    config: Option<ConfigSpec>,
+    #[serde(default)]
+    copy: Vec<PathBuf>,
+    #[serde(default)]
+    icl: Vec<IclSpec>,
+    #[serde(default)]
+    wae: Vec<WaeSpec>,
+    #[serde(default)]
+    page: BTreeMap<String, PageSpec>,
+    #[serde(default, rename = "struct")]
+    structs: BTreeMap<String, StructSpec>,
+    #[serde(default)]
+    group: BTreeMap<String, RawGroup>,
+    #[serde(default)]
+    control: BTreeMap<String, toml::Table>,
+    #[serde(default)]
+    style: BTreeMap<String, toml::Table>,
+}
+
+impl RootFile {
+    pub(crate) fn split(self) -> (Settings, RawDeclarations) {
+        let settings = Settings {
+            screen: self.screen,
+            chip: self.chip,
+            output: self.output,
+            include: self.include,
+            config: self.config,
+        };
+        let declarations = RawDeclarations {
+            copy: self.copy,
+            icl: self.icl,
+            wae: self.wae,
+            page: self.page,
+            structs: self.structs,
+            group: self.group,
+            control: self.control,
+            style: self.style,
+        };
+        (settings, declarations)
+    }
+}
+
+/// What a file declares as written. Controls stay tables until the project
+/// applies their styles.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RawDeclarations {
     #[serde(default)]
     pub copy: Vec<PathBuf>,
     #[serde(default)]
@@ -47,28 +96,28 @@ pub struct RootFile {
     pub wae: Vec<WaeSpec>,
     #[serde(default)]
     pub page: BTreeMap<String, PageSpec>,
+    #[serde(default, rename = "struct")]
+    pub structs: BTreeMap<String, StructSpec>,
     #[serde(default)]
-    pub control: BTreeMap<String, Control>,
+    pub group: BTreeMap<String, RawGroup>,
+    #[serde(default)]
+    pub control: BTreeMap<String, toml::Table>,
+    #[serde(default)]
+    pub style: BTreeMap<String, toml::Table>,
 }
 
-impl RootFile {
-    pub fn split(self) -> (Settings, Declarations) {
-        let settings = Settings {
-            screen: self.screen,
-            chip: self.chip,
-            output: self.output,
-            include: self.include,
-            config: self.config,
-        };
-        let declarations = Declarations {
-            copy: self.copy,
-            icl: self.icl,
-            wae: self.wae,
-            page: self.page,
-            control: self.control,
-        };
-        (settings, declarations)
-    }
+/// A group as written, its controls still tables.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RawGroup {
+    #[serde(rename = "struct")]
+    pub bound: Option<String>,
+    #[serde(default)]
+    pub origin: Pos,
+    #[serde(default)]
+    pub step: Step,
+    #[serde(default)]
+    pub control: Vec<toml::Table>,
 }
 
 /// What only `project.toml` sets: the device, the build and the other
@@ -91,27 +140,138 @@ fn default_output() -> PathBuf {
     "target".into()
 }
 
-/// What any file of a project declares. Names are unique across the files,
-/// one set for pages and one for controls.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// What any file of a project declares. Names are unique across the files:
+/// one set for pages, one for structs, one for styles, and one for the
+/// controls and groups that pages list.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Declarations {
     /// Files copied into the output unchanged, relative to the project root.
-    #[serde(default)]
     pub copy: Vec<PathBuf>,
     /// Icon libraries.
-    #[serde(default)]
     pub icl: Vec<IclSpec>,
     /// Audio libraries.
-    #[serde(default)]
     pub wae: Vec<WaeSpec>,
     /// `[page.<name>]` tables.
-    #[serde(default)]
     pub page: BTreeMap<String, PageSpec>,
-    /// `[control.<name>]` tables. Their order means nothing; a page's list
-    /// sets the drawing order.
-    #[serde(default)]
+    /// `[struct.<name>]` tables.
+    pub structs: BTreeMap<String, StructSpec>,
+    /// `[group.<name>]` tables.
+    pub group: BTreeMap<String, GroupSpec>,
+    /// `[control.<name>]` tables, with their styles applied. Their order
+    /// means nothing; a page's list sets the drawing order.
     pub control: BTreeMap<String, Control>,
+    /// `[style.<name>]` tables: keys a control naming the style takes unless
+    /// it sets them.
+    pub style: BTreeMap<String, toml::Table>,
+}
+
+/// A `[struct.<name>]` table: VPs laid out from `vp` the way the firmware
+/// sees them. With a `count`, it is an array of `count` elements, `stride`
+/// words apart.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructSpec {
+    /// VP of the first field of the first element.
+    pub vp: u16,
+    /// Elements, 1 unless an array.
+    #[serde(default = "one")]
+    pub count: u16,
+    /// Words from one element to the next; the element's size when not set.
+    pub stride: Option<u16>,
+    /// The fields in order, each after the one before unless `at` places it.
+    pub fields: Vec<FieldSpec>,
+}
+
+fn one() -> u16 {
+    1
+}
+
+/// A field of a struct.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FieldSpec {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub kind: FieldKind,
+    /// Bytes of a `text` field.
+    pub length: Option<u16>,
+    /// Names of an `enum` field's values, from 0.
+    pub variants: Option<Vec<String>>,
+    /// Offset in words from the start of the element.
+    pub at: Option<u16>,
+}
+
+/// What a field holds, and so how many words it takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldKind {
+    U16,
+    I16,
+    U32,
+    I32,
+    I64,
+    F32,
+    F64,
+    /// A word, 0 or 1.
+    Bool,
+    /// A word holding the index of one of `variants`.
+    Enum,
+    /// `length` bytes, two to a word.
+    Text,
+}
+
+impl FieldKind {
+    /// Words the field takes; `length` is the bytes of a text field.
+    pub fn words(self, length: u16) -> u16 {
+        match self {
+            FieldKind::U16 | FieldKind::I16 | FieldKind::Bool | FieldKind::Enum => 1,
+            FieldKind::U32 | FieldKind::I32 | FieldKind::F32 => 2,
+            FieldKind::I64 | FieldKind::F64 => 4,
+            FieldKind::Text => length.div_ceil(2),
+        }
+    }
+
+    /// The name written in `type`.
+    pub fn name(self) -> &'static str {
+        match self {
+            FieldKind::U16 => "u16",
+            FieldKind::I16 => "i16",
+            FieldKind::U32 => "u32",
+            FieldKind::I32 => "i32",
+            FieldKind::I64 => "i64",
+            FieldKind::F32 => "f32",
+            FieldKind::F64 => "f64",
+            FieldKind::Bool => "bool",
+            FieldKind::Enum => "enum",
+            FieldKind::Text => "text",
+        }
+    }
+}
+
+/// A `[group.<name>]` table: controls placed from `origin`, in drawing
+/// order. Bound to a struct, the group is drawn once for each element,
+/// moved by `step` each time, and its controls name the element's fields
+/// without the struct.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GroupSpec {
+    /// The struct whose elements the group draws.
+    pub bound: Option<String>,
+    /// Where `(0, 0)` of its controls is on the screen.
+    pub origin: Pos,
+    /// How far each element's copy moves from the one before.
+    pub step: Step,
+    /// `[[group.<name>.control]]` tables, with their styles applied.
+    pub controls: Vec<Control>,
+}
+
+/// A move in pixels, which may be negative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Step {
+    #[serde(default)]
+    pub x: i32,
+    #[serde(default)]
+    pub y: i32,
 }
 
 /// `[config]`: the hardware configuration file, `T5LCFG.CFG`. Keys follow
@@ -432,23 +592,27 @@ pub struct PageSpec {
     pub controls: Vec<String>,
 }
 
-/// A `[control.<name>]` table, selected by its `type` key.
+/// A control, selected by its `type` key. It names the VP it shows or
+/// writes as `vp`, or as a struct's `field`, which then also gives what the
+/// control is otherwise told: a data control's type, a text's length, the
+/// values an icon shows.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Control {
-    /// "Return key code" touch control: writes `value` to `vp` when pressed.
+    /// "Return key code" touch control: writes `value` to its VP when
+    /// pressed.
     Button(Button),
     /// "Basic touch" control: a keyboard key, sending `code` to the data
     /// input being edited.
     Key(Key),
-    /// "Data input" touch control: types a number into `vp` on a keyboard.
+    /// "Data input" touch control: types a number into its VP on a keyboard.
     Input(Input),
     /// "Variable icon": shows icon `icon_min + (value − val_min)` of ICL
     /// `icon_lib`.
     Icon(Icon),
     /// "Data variable": shows a VP as a number.
     Data(Data),
-    /// "Text display": shows text stored from `vp` on.
+    /// "Text display": shows text stored from its VP on.
     Text(Text),
     /// "Progress bar": fills `area` in proportion to the VP value.
     Progress(Progress),
@@ -462,6 +626,19 @@ impl Control {
             Control::Button(_) | Control::Key(_) | Control::Input(_)
         )
     }
+
+    /// The `type` it is written with.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Control::Button(_) => "button",
+            Control::Key(_) => "key",
+            Control::Input(_) => "input",
+            Control::Icon(_) => "icon",
+            Control::Data(_) => "data",
+            Control::Text(_) => "text",
+            Control::Progress(_) => "progress",
+        }
+    }
 }
 
 /// A rectangle in pixels.
@@ -474,39 +651,12 @@ pub struct Rect {
     pub h: u16,
 }
 
-impl Rect {
-    /// The rectangle as the files store it. Coordinates past `u16::MAX` are
-    /// reported by the check, so they saturate here.
-    pub fn to_area(self) -> Area {
-        Area::new(
-            self.x,
-            self.y,
-            self.x.saturating_add(self.w),
-            self.y.saturating_add(self.h),
-        )
-    }
-
-    /// Right and bottom edges, which may exceed `u16`.
-    pub fn end(self) -> (u32, u32) {
-        (
-            u32::from(self.x) + u32::from(self.w),
-            u32::from(self.y) + u32::from(self.h),
-        )
-    }
-}
-
 /// A position in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Pos {
     pub x: u16,
     pub y: u16,
-}
-
-impl From<Pos> for Point {
-    fn from(pos: Pos) -> Self {
-        Point::new(pos.x, pos.y)
-    }
 }
 
 /// A colour, written `"#RRGGBB"`. The files store RGB565.
@@ -572,6 +722,46 @@ impl<'de> Deserialize<'de> for Color {
     }
 }
 
+/// A word, written as a number or as a name: a variant of an enum field, or
+/// `"index"`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NumberOrName {
+    Number(u16),
+    Name(String),
+}
+
+impl<'de> Deserialize<'de> for NumberOrName {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+
+        impl de::Visitor<'_> for Visitor {
+            type Value = NumberOrName;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a number 0-65535 or a variant's name")
+            }
+
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<NumberOrName, E> {
+                u16::try_from(value)
+                    .map(NumberOrName::Number)
+                    .map_err(|_| E::custom(format!("{value} is not in 0-65535")))
+            }
+
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<NumberOrName, E> {
+                u16::try_from(value)
+                    .map(NumberOrName::Number)
+                    .map_err(|_| E::custom(format!("{value} is not in 0-65535")))
+            }
+
+            fn visit_str<E: de::Error>(self, text: &str) -> Result<NumberOrName, E> {
+                Ok(NumberOrName::Name(text.to_owned()))
+            }
+        }
+
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Button {
@@ -581,12 +771,16 @@ pub struct Button {
     /// Name of the page whose pixels show over the area while it is
     /// pressed.
     pub pressed_page: Option<String>,
-    pub vp: u16,
+    pub vp: Option<u16>,
+    /// The field written instead of `vp`.
+    pub field: Option<String>,
     /// Which part of the VP receives `value`: `"word"`, `"high_byte"`,
     /// `"low_byte"` or `{ bit = n }`.
     #[serde(default)]
     pub target: KeyTarget,
-    pub value: u16,
+    /// A number, a variant of the field, or `"index"`: the element the
+    /// group's copy draws.
+    pub value: NumberOrName,
     /// Hold time in 0.1 s units.
     #[serde(default)]
     pub hold_time: u8,
@@ -623,9 +817,10 @@ pub struct Input {
     /// Name of the page whose pixels show over the area while it is
     /// pressed.
     pub pressed_page: Option<String>,
-    pub vp: u16,
-    #[serde(default)]
-    pub data_type: InputDataType,
+    pub vp: Option<u16>,
+    /// The field typed into instead of `vp`; it gives the data type.
+    pub field: Option<String>,
+    pub data_type: Option<InputDataType>,
     #[serde(default = "default_input_integer_digits")]
     pub integer_digits: u8,
     #[serde(default)]
@@ -675,7 +870,7 @@ fn default_input_font_size() -> u8 {
 pub struct KeyboardPage {
     /// Name of the page holding the keyboard image and its `key` controls.
     pub page: String,
-    /// The keyboard on that page.
+    /// The keyboard on that page; a group's origin does not move it.
     pub area: Rect,
     /// Where the keyboard is drawn on the input's page.
     pub position: Pos,
@@ -691,7 +886,9 @@ pub struct Limits {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Icon {
-    pub vp: u16,
+    pub vp: Option<u16>,
+    /// The field shown instead of `vp`.
+    pub field: Option<String>,
     /// Description pointer.
     pub sp: Option<u16>,
     #[serde(default)]
@@ -701,13 +898,17 @@ pub struct Icon {
     /// active background ICL.
     #[serde(default)]
     pub icon_lib: u8,
-    /// VP value shown as `icon_min`.
-    #[serde(default)]
-    pub val_min: u16,
-    /// VP value shown as `icon_max`.
-    pub val_max: u16,
+    /// Value shown as `icon_min`: 0, or the first variant of an enum field,
+    /// unless set.
+    pub val_min: Option<NumberOrName>,
+    /// Value shown as `icon_max`: an enum field's last variant unless set.
+    pub val_max: Option<NumberOrName>,
+    /// One value, shown as `icon_min` and nothing else: sets `val_min` and
+    /// `val_max` both.
+    pub when: Option<NumberOrName>,
     pub icon_min: u16,
-    pub icon_max: u16,
+    /// `icon_min` plus as many icons as values unless set.
+    pub icon_max: Option<u16>,
     #[serde(default)]
     pub show_background: bool,
     #[serde(default)]
@@ -729,7 +930,9 @@ fn default_filter() -> u8 {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Data {
-    pub vp: u16,
+    pub vp: Option<u16>,
+    /// The field shown instead of `vp`; it gives the data type.
+    pub field: Option<String>,
     /// Description pointer.
     pub sp: Option<u16>,
     #[serde(default)]
@@ -752,8 +955,7 @@ pub struct Data {
     pub integer_digits: u8,
     #[serde(default)]
     pub decimal_digits: u8,
-    #[serde(default)]
-    pub data_type: DataType,
+    pub data_type: Option<DataType>,
     /// ASCII, at most 11 bytes.
     #[serde(default)]
     pub unit: String,
@@ -770,7 +972,9 @@ fn default_integer_digits() -> u8 {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Text {
-    pub vp: u16,
+    pub vp: Option<u16>,
+    /// The field shown instead of `vp`; it gives the length.
+    pub field: Option<String>,
     /// Description pointer.
     pub sp: Option<u16>,
     #[serde(default)]
@@ -779,8 +983,7 @@ pub struct Text {
     #[serde(default)]
     pub color: Color,
     /// Maximum text length in bytes.
-    #[serde(default = "default_text_length")]
-    pub length: u16,
+    pub length: Option<u16>,
     #[serde(default)]
     pub encoding: Encoding,
     /// Font for ASCII characters in the multi-byte encodings.
@@ -805,10 +1008,6 @@ pub struct Text {
     pub line_spacing: u8,
 }
 
-fn default_text_length() -> u16 {
-    TextVar::default().length
-}
-
 fn default_font_width() -> u8 {
     TextVar::default().font_width
 }
@@ -820,7 +1019,9 @@ fn default_font_height() -> u8 {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Progress {
-    pub vp: u16,
+    pub vp: Option<u16>,
+    /// The field shown instead of `vp`.
+    pub field: Option<String>,
     /// Description pointer.
     pub sp: Option<u16>,
     pub area: Rect,
@@ -829,8 +1030,7 @@ pub struct Progress {
     pub val_min: i16,
     /// Value shown as a full bar.
     pub val_max: i16,
-    #[serde(default)]
-    pub data_type: BarDataType,
+    pub data_type: Option<BarDataType>,
     #[serde(default)]
     pub direction: BarDirection,
     /// The filled part.
@@ -849,180 +1049,10 @@ pub struct Progress {
     pub rate_vp: Option<u16>,
 }
 
-/// A touch control's area and pages. `page_id` gives the ID of a page by
-/// name; names it does not know are left out.
-fn touch(
-    area: Rect,
-    next_page: Option<&str>,
-    pressed_page: Option<&str>,
-    page_id: impl Fn(&str) -> Option<u16>,
-    action: TouchAction,
-) -> Touch {
-    Touch {
-        area: area.to_area(),
-        next_page: next_page.and_then(&page_id),
-        pressed_page: pressed_page.and_then(&page_id),
-        action,
-    }
-}
-
-impl Button {
-    /// The control as the touch file holds it. `page_id` gives the ID of a
-    /// page by name; names it does not know are left out, and the check
-    /// reports them.
-    pub fn to_touch(&self, page_id: impl Fn(&str) -> Option<u16>) -> Touch {
-        touch(
-            self.area,
-            self.next_page.as_deref(),
-            self.pressed_page.as_deref(),
-            page_id,
-            TouchAction::KeyCode(KeyCode {
-                vp: self.vp,
-                target: self.target,
-                value: self.value,
-                hold_time: self.hold_time,
-                upload: self.upload,
-            }),
-        )
-    }
-}
-
-impl Key {
-    /// Like [`Button::to_touch`].
-    pub fn to_touch(&self, page_id: impl Fn(&str) -> Option<u16>) -> Touch {
-        touch(
-            self.area,
-            self.next_page.as_deref(),
-            self.pressed_page.as_deref(),
-            page_id,
-            TouchAction::Basic(self.code),
-        )
-    }
-}
-
-impl Input {
-    /// Like [`Button::to_touch`]. A keyboard on a page `page_id` does not
-    /// know becomes the keys of the input's own page.
-    pub fn to_touch(&self, page_id: impl Fn(&str) -> Option<u16>) -> Touch {
-        let keyboard = self
-            .keyboard
-            .as_ref()
-            .and_then(|keyboard| {
-                Some(Keyboard::Page {
-                    page: page_id(&keyboard.page)?,
-                    area: keyboard.area.to_area(),
-                    position: keyboard.position.into(),
-                })
-            })
-            .unwrap_or(Keyboard::OnPage);
-        touch(
-            self.area,
-            self.next_page.as_deref(),
-            self.pressed_page.as_deref(),
-            page_id,
-            TouchAction::DataInput(DataInput {
-                vp: self.vp,
-                data_type: self.data_type,
-                integer_digits: self.integer_digits,
-                decimal_digits: self.decimal_digits,
-                position: self.position.into(),
-                color: self.color.to_rgb565(),
-                font: self.font,
-                font_size: self.font_size,
-                cursor_color: self.cursor_color,
-                masked: self.masked,
-                keyboard,
-                limits: self.limits.map(|limits| limits.min..=limits.max),
-                load_vp: self.load_vp,
-                load_value: self.load_value,
-                keyboard_transparency: self.keyboard_transparency,
-                upload: self.upload,
-            }),
-        )
-    }
-}
-
-impl Icon {
-    pub fn to_display(&self) -> Display {
-        Display::Icon(IconVar {
-            vp: self.vp,
-            sp: self.sp,
-            popup_menu: self.popup_menu,
-            position: self.position.into(),
-            val_min: self.val_min,
-            val_max: self.val_max,
-            icon_min: self.icon_min,
-            icon_max: self.icon_max,
-            icon_lib: self.icon_lib,
-            show_background: self.show_background,
-            layer_mode: self.layer_mode,
-            icon_brightness: self.icon_brightness,
-            background_brightness: self.background_brightness,
-            filter: self.filter,
-        })
-    }
-}
-
-impl Data {
-    pub fn to_display(&self) -> Display {
-        Display::Data(DataVar {
-            vp: self.vp,
-            sp: self.sp,
-            popup_menu: self.popup_menu,
-            position: self.position.into(),
-            color: self.color.to_rgb565(),
-            font: self.font,
-            font_size: self.font_size,
-            align: self.align,
-            auto_spacing: self.auto_spacing,
-            leading_zeros: self.leading_zeros,
-            integer_digits: self.integer_digits,
-            decimal_digits: self.decimal_digits,
-            data_type: self.data_type,
-            unit: self.unit.clone(),
-        })
-    }
-}
-
-impl Text {
-    pub fn to_display(&self) -> Display {
-        Display::Text(TextVar {
-            vp: self.vp,
-            sp: self.sp,
-            popup_menu: self.popup_menu,
-            area: self.area.to_area(),
-            color: self.color.to_rgb565(),
-            length: self.length,
-            encoding: self.encoding,
-            ascii_font: self.ascii_font,
-            font: self.font,
-            font_width: self.font_width,
-            font_height: self.font_height,
-            align: self.align,
-            vertical_align: self.vertical_align,
-            auto_spacing: self.auto_spacing,
-            char_spacing: self.char_spacing,
-            line_spacing: self.line_spacing,
-        })
-    }
-}
-
-impl Progress {
-    pub fn to_display(&self) -> Display {
-        Display::Progress(ProgressBar {
-            vp: self.vp,
-            sp: self.sp,
-            area: self.area.to_area(),
-            val_min: self.val_min,
-            val_max: self.val_max,
-            data_type: self.data_type,
-            direction: self.direction,
-            bar_color: self.bar_color.to_rgb565(),
-            border_color: self.border_color.to_rgb565(),
-            background_color: self.background_color.to_rgb565(),
-            show_border: self.show_border,
-            fill_background: self.fill_background,
-            rate_vp: self.rate_vp,
-        })
-    }
+/// Whether `name` is lowercase letters, digits and `_`, starting with a
+/// letter, so code can use it as an identifier.
+pub(crate) fn is_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
