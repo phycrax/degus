@@ -4,7 +4,8 @@
 //! A [`Bundle`] holds everything in the folder: the configuration, the
 //! controls of every page, the icon and audio libraries and any other files.
 //! [`Bundle::check`] reports problems, and [`Bundle::write`] checks the
-//! bundle and writes the folder.
+//! bundle and writes the folder. [`Bundle::read`] reads a folder back,
+//! including one made by DWIN's tools.
 //!
 //! The parts come from the format crates, re-exported here: [`config`],
 //! [`controls`], [`icl`] and [`wae`].

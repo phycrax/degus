@@ -9,7 +9,7 @@ use degus::controls::{
 use degus::icl::image::{DynamicImage, Rgb, RgbImage};
 use degus::icl::{Chip, Icl, IclBuilder, IclOptions, IconSource};
 use degus::wae::{SampleFormat, Wae};
-use degus::{Bundle, Device, Error, Size};
+use degus::{Bundle, Device, Error, File, Size};
 
 const SCREEN: Size = Size::new(800, 480);
 
@@ -443,5 +443,82 @@ fn empty_libraries_cannot_be_written() {
     assert!(matches!(
         bundle.to_files(),
         Err(Error::Icl { file: 41, .. })
+    ));
+}
+
+#[test]
+fn reads_what_it_writes() {
+    let dir = temp_dir("reads_what_it_writes");
+    let bundle = panel();
+    bundle.write(&dir).unwrap();
+    std::fs::create_dir(dir.join("DWIN_SET").join("backup")).unwrap();
+    assert_eq!(Bundle::read(&dir, bundle.device).unwrap(), bundle);
+}
+
+#[test]
+fn reads_files_as_the_display_does() {
+    let bundle = panel();
+    let mut files = bundle.to_files().unwrap();
+    for file in &mut files {
+        file.name = match file.name.as_str() {
+            "13TouchFile.bin" => "13触控配置文件.bin".into(),
+            "32.icl" => "32_backgrounds.ICL".into(),
+            "T5LCFG.CFG" => "T5LCFG_800480.CFG".into(),
+            _ => continue,
+        };
+    }
+    files.push(File::new("22_Config.bin", vec![1, 2]));
+    files.push(File::new("300.icl", vec![3]));
+    let read = Bundle::from_files(files, bundle.device).unwrap();
+    assert_eq!(read.config, bundle.config);
+    assert_eq!(read.controls, bundle.controls);
+    assert_eq!(read.icls, bundle.icls);
+    // ICL numbers are bytes, so 300.icl stays a plain file.
+    assert_eq!(
+        read.files.keys().collect::<Vec<_>>(),
+        ["0_DWIN_ASC.HZK", "22_Config.bin", "300.icl"]
+    );
+
+    // Without file 13, the pages have no touch controls.
+    let files = bundle
+        .to_files()
+        .unwrap()
+        .into_iter()
+        .filter(|file| file.name != "13TouchFile.bin");
+    let read = Bundle::from_files(files, bundle.device).unwrap();
+    assert!(read.controls.iter().all(|(_, page)| page.touch.is_empty()));
+    assert_eq!(read.controls.get(0).unwrap().display.len(), 1);
+}
+
+#[test]
+fn rejects_files_that_do_not_read() {
+    let device = Device::new(SCREEN);
+    let duplicate = Bundle::from_files(
+        [File::new("32.icl", vec![]), File::new("32_x.ICL", vec![])],
+        device,
+    );
+    assert!(matches!(
+        duplicate,
+        Err(Error::Duplicate { first, second }) if first == "32.icl" && second == "32_x.ICL"
+    ));
+    let configs = [
+        File::new("T5LCFG.CFG", vec![]),
+        File::new("t5lcfg2.cfg", vec![]),
+    ];
+    assert!(matches!(
+        Bundle::from_files(configs, device),
+        Err(Error::Duplicate { .. })
+    ));
+    assert!(matches!(
+        Bundle::from_files([File::new("40.icl", b"DGUS_2".to_vec())], device),
+        Err(Error::Icl { file: 40, .. })
+    ));
+    assert!(matches!(
+        Bundle::from_files([File::new("T5LCFG.CFG", vec![0; 4])], device),
+        Err(Error::Config(_))
+    ));
+    assert!(matches!(
+        Bundle::read(temp_dir("rejects_files_that_do_not_read"), device),
+        Err(Error::Io { .. })
     ));
 }

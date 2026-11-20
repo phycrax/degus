@@ -7,7 +7,7 @@ use degus_controls::{
 };
 use degus_icl::Icl;
 
-use crate::bundle::{Bundle, LayoutProblem, icl_name, layout_problems, wae_name};
+use crate::bundle::{Bundle, LayoutProblem, icl_name, is_config_file, layout_problems, wae_name};
 use crate::file::number;
 
 /// The background ICL of a display whose configuration names no other.
@@ -570,12 +570,6 @@ impl<'a> Checker<'a> {
 /// Whether `touch` is a keyboard key: a basic touch that sends a key.
 fn is_key(touch: &Touch) -> bool {
     matches!(touch.action, TouchAction::Basic(code) if code != key::NONE)
-}
-
-/// The display reads any `T5LCFG*.CFG` as its configuration.
-fn is_config_file(name: &str) -> bool {
-    let name = name.to_ascii_uppercase();
-    name.starts_with("T5LCFG") && name.ends_with(".CFG")
 }
 
 /// Where a control file error is, and what it is.

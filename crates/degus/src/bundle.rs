@@ -97,6 +97,94 @@ impl Bundle {
         }
     }
 
+    /// Reads the `DWIN_SET` folder in `dir`; see [`Bundle::from_files`].
+    /// Folders inside it are skipped, as the display skips them.
+    pub fn read(dir: impl AsRef<Path>, device: Device) -> Result<Self> {
+        let folder = dir.as_ref().join(FOLDER);
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(&folder).map_err(io_error(&folder))? {
+            let entry = entry.map_err(io_error(&folder))?;
+            let path = entry.path();
+            if !entry.file_type().map_err(io_error(&path))?.is_file() {
+                continue;
+            }
+            let name = entry
+                .file_name()
+                .into_string()
+                .map_err(|name| Error::FileName {
+                    name: name.to_string_lossy().into_owned(),
+                    reason: "it is not UTF-8",
+                })?;
+            let bytes = std::fs::read(&path).map_err(io_error(&path))?;
+            files.push(File::new(name, bytes));
+        }
+        Self::from_files(files, device)
+    }
+
+    /// The bundle that `files` make, as the display reads them:
+    ///
+    /// - `T5LCFG*.CFG` is the configuration;
+    /// - files 13 and 14 ending in `.bin` are the controls;
+    /// - files ending in `.icl` and `.wae` are the libraries of their file
+    ///   numbers, which are written back as `<n>.icl` and `<n>.wae`;
+    /// - the other files go in [`Bundle::files`].
+    ///
+    /// Names are matched ignoring case. Fails on two files with the same
+    /// role, and on a file that does not read.
+    pub fn from_files(files: impl IntoIterator<Item = File>, device: Device) -> Result<Self> {
+        let mut files: Vec<(Role, File)> = files
+            .into_iter()
+            .map(|file| (Role::of(&file.name), file))
+            .collect();
+        files.sort_by(|(_, a), (_, b)| a.name.cmp(&b.name));
+        // The name of the file with each role.
+        let mut roles: BTreeMap<Role, &str> = BTreeMap::new();
+        for (role, file) in &files {
+            if *role != Role::Other
+                && let Some(first) = roles.insert(*role, &file.name)
+            {
+                return Err(Error::Duplicate {
+                    first: first.to_owned(),
+                    second: file.name.clone(),
+                });
+            }
+        }
+
+        let mut bundle = Bundle::new(device);
+        let (mut touch, mut display) = (None, None);
+        for (role, file) in files {
+            match role {
+                Role::Config => bundle.config = Some(Config::from_bytes(&file.bytes)?),
+                Role::Touch => touch = Some(file.bytes),
+                Role::Display => display = Some(file.bytes),
+                Role::Icl(number) => {
+                    let icl = Icl::from_bytes(&file.bytes).map_err(|source| Error::Icl {
+                        file: number,
+                        source,
+                    })?;
+                    bundle.icls.insert(number, icl);
+                }
+                Role::Wae(number) => {
+                    let wae = Wae::from_bytes(&file.bytes).map_err(|source| Error::Wae {
+                        file: number,
+                        source,
+                    })?;
+                    bundle.waes.insert(number, wae);
+                }
+                Role::Other => {
+                    bundle.files.insert(file.name, file.bytes);
+                }
+            }
+        }
+        if touch.is_some() || display.is_some() {
+            let empty = Controls::new().to_bytes()?;
+            let touch = touch.unwrap_or(empty.touch);
+            let display = display.unwrap_or(empty.display);
+            bundle.controls = Controls::from_bytes(&touch, &display)?;
+        }
+        Ok(bundle)
+    }
+
     /// Encodes every file: the numbered ones by number, then the others by
     /// name.
     ///
@@ -169,6 +257,44 @@ impl Bundle {
             warnings: diagnostics,
         })
     }
+}
+
+/// What a file of the folder is to the display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Role {
+    Config,
+    Touch,
+    Display,
+    Icl(u8),
+    Wae(u8),
+    Other,
+}
+
+impl Role {
+    fn of(name: &str) -> Self {
+        let lower = name.to_ascii_lowercase();
+        let number = number(name);
+        let library = number.and_then(|number| u8::try_from(number).ok());
+        if is_config_file(name) {
+            Role::Config
+        } else if let (Some(number), true) = (library, lower.ends_with(".icl")) {
+            Role::Icl(number)
+        } else if let (Some(number), true) = (library, lower.ends_with(".wae")) {
+            Role::Wae(number)
+        } else if lower.ends_with(".bin") && number == Some(13) {
+            Role::Touch
+        } else if lower.ends_with(".bin") && number == Some(14) {
+            Role::Display
+        } else {
+            Role::Other
+        }
+    }
+}
+
+/// The display reads any `T5LCFG*.CFG` as its configuration.
+pub(crate) fn is_config_file(name: &str) -> bool {
+    let name = name.to_ascii_uppercase();
+    name.starts_with("T5LCFG") && name.ends_with(".CFG")
 }
 
 pub(crate) fn icl_name(file: u8) -> String {
