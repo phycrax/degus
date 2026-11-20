@@ -7,13 +7,9 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace.dependencies]
-degus-codec = { path = "crates/codec" }
 degus-config = { path = "crates/config" }
 degus-controls = { path = "crates/controls" }
 degus-icl = { path = "crates/icl" }
-degus-project = { path = "crates/project" }
-degus-sim = { path = "crates/sim" }
-degus-sim-gui = { path = "crates/sim-gui" }
 degus-wae = { path = "crates/wae" }
 
 [profile.dev.package."*"]

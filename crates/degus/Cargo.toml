@@ -2,16 +2,10 @@
 name = "degus"
 version.workspace = true
 edition.workspace = true
-description = "Builds DWIN T5L DWIN_SET folders from TOML projects"
+description = "Builds the DWIN_SET folder of DWIN T5L displays from Rust"
 
 [dependencies]
-clap = { version = "4.6.7", features = ["derive"] }
-degus-project.workspace = true
-degus-sim.workspace = true
-degus-sim-gui = { workspace = true, optional = true }
-
-[features]
-## `degus sim` opens a window; without it, it runs scripts only.
-gui = ["dep:degus-sim-gui"]
-## `degus sim --serial` links a host over a serial port.
-serial = ["degus-sim/serial"]
+degus-config.workspace = true
+degus-controls.workspace = true
+degus-icl.workspace = true
+degus-wae.workspace = true
