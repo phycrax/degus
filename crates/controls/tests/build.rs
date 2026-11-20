@@ -3,7 +3,7 @@ use std::assert_matches;
 use degus_controls::{
     Align, Area, BarDataType, BarDirection, Controls, CursorColor, DataInput, DataType, DataVar,
     Display, Encoding, Error, IconVar, InputDataType, KeyCode, KeyTarget, Keyboard, LayerMode,
-    PageControls, Point, ProgressBar, TextAlign, TextVar, Touch, TouchAction, VerticalAlign,
+    PageControls, Point, ProgressBar, TextAlign, TextVar, Touch, TouchAction, VerticalAlign, key,
 };
 use hex_literal::hex;
 
@@ -29,7 +29,7 @@ fn key_code_touch_matches_editor_output() {
         Area::new(1648, 848, 1798, 998),
         KeyCode::new(0xBA00, 2),
     ));
-    let touch = controls.build().unwrap().touch;
+    let touch = controls.to_bytes().unwrap().touch;
     assert_eq!(
         touch,
         hex!(
@@ -75,7 +75,7 @@ fn data_input_and_key_records_follow_the_editor_layout() {
     // A new editor control, except that it is not masked.
     page.touch
         .push(Touch::new(Area::default(), DataInput::default()));
-    let touch = controls.build().unwrap().touch;
+    let touch = controls.to_bytes().unwrap().touch;
 
     assert_eq!(
         touch,
@@ -135,7 +135,7 @@ fn display_records_match_editor_output() {
         }
         .into(),
     );
-    let file = controls.build().unwrap().display;
+    let file = controls.to_bytes().unwrap().display;
 
     assert_eq!(entry(&file, 0), (1, RECORDS));
     assert_eq!(entry(&file, 2), (1, RECORDS + 32));
@@ -187,7 +187,7 @@ fn progress_bar_records_follow_the_editor_layout() {
     );
     // A new editor control: no border, no background, no rate.
     page.display.push(ProgressBar::default().into());
-    let file = controls.build().unwrap().display;
+    let file = controls.to_bytes().unwrap().display;
 
     assert_eq!(
         record(&file, RECORDS),
@@ -220,7 +220,7 @@ fn display_file_has_header_page_table_and_end_marker() {
     controls.page_mut(7).display.push(icon(3));
     // Pages without controls still raise the highest page ID.
     controls.page_mut(40);
-    let file = controls.build().unwrap().display;
+    let file = controls.to_bytes().unwrap().display;
 
     assert_eq!(file[..16], hex!("1444 4755 535f 3210 0028 0000 0000 0000"));
     assert_eq!(file.len(), RECORDS + 3 * 32 + 32);
@@ -237,7 +237,7 @@ fn display_file_has_header_page_table_and_end_marker() {
 
 #[test]
 fn empty_project_builds_valid_files() {
-    let built = Controls::new().build().unwrap();
+    let built = Controls::new().to_bytes().unwrap();
     assert_eq!(built.touch, [0xFF, 0xFF]);
     assert_eq!(built.display.len(), RECORDS + 32);
 }
@@ -387,7 +387,7 @@ fn writes_every_field() {
         .into(),
     );
 
-    let built = controls.build().unwrap();
+    let built = controls.to_bytes().unwrap();
     assert_eq!(
         built.touch,
         hex!(
@@ -437,7 +437,7 @@ fn writes_every_field() {
 fn rejects_what_the_files_cannot_hold() {
     let mut controls = Controls::new();
     controls.page_mut(4092);
-    assert_matches!(controls.build(), Err(Error::PageId { page: 4092 }));
+    assert_matches!(controls.to_bytes(), Err(Error::PageId { page: 4092 }));
 
     let mut controls = Controls::new();
     controls.insert(
@@ -448,7 +448,7 @@ fn rejects_what_the_files_cannot_hold() {
         },
     );
     assert_matches!(
-        controls.build(),
+        controls.to_bytes(),
         Err(Error::TooManyDisplays {
             page: 1,
             count: 256
@@ -464,7 +464,14 @@ fn rejects_what_the_files_cannot_hold() {
             }
             .into(),
         );
-        assert_matches!(controls.build(), Err(Error::Unit { page: 2, .. }));
+        assert_matches!(
+            controls.to_bytes(),
+            Err(Error::Unit {
+                page: 2,
+                index: 0,
+                ..
+            })
+        );
     }
 
     let mut controls = Controls::new();
@@ -475,7 +482,14 @@ fn rejects_what_the_files_cannot_hold() {
             ..KeyCode::new(0, 0)
         },
     ));
-    assert_matches!(controls.build(), Err(Error::BitIndex { page: 3, bit: 16 }));
+    assert_matches!(
+        controls.to_bytes(),
+        Err(Error::BitIndex {
+            page: 3,
+            index: 0,
+            bit: 16
+        })
+    );
 
     // Basic touch codes starting with FE or FD would read as other controls.
     for code in [0xFE31, 0xFD00] {
@@ -485,8 +499,30 @@ fn rejects_what_the_files_cannot_hold() {
             .touch
             .push(Touch::new(Area::default(), TouchAction::Basic(code)));
         assert_matches!(
-            controls.build(),
-            Err(Error::BasicKey { page: 6, code: c }) if c == code
+            controls.to_bytes(),
+            Err(Error::BasicKey { page: 6, index: 0, code: c }) if c == code
         );
     }
+}
+
+#[test]
+fn helpers_give_the_values_the_files_hold() {
+    assert_eq!(Area::sized(10, 20, 30, 40), Area::new(10, 20, 40, 60));
+    assert_eq!(Area::sized(65000, 0, 1000, 1).right, u16::MAX);
+    assert_eq!(degus_controls::rgb565(0x0408F8), 0x005F);
+    assert_eq!(
+        (0..=9).map(key::digit).collect::<Vec<_>>(),
+        (0x30..=0x39).collect::<Vec<_>>()
+    );
+
+    // A plain page-switch button is a basic touch sending no key.
+    let mut controls = Controls::new();
+    controls.page_mut(0).touch.push(Touch {
+        next_page: Some(1),
+        ..Touch::new(Area::sized(0, 0, 10, 10), TouchAction::Basic(key::NONE))
+    });
+    assert_eq!(
+        controls.to_bytes().unwrap().touch,
+        hex!("0000 0000 0000 000a 000a 0001 ff00 ff00 ffff")
+    );
 }

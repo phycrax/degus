@@ -10,17 +10,17 @@
 //! - display: "Variable icon" ([`IconVar`]), "Data variable" ([`DataVar`]),
 //!   "Text display" ([`TextVar`]) and "Progress bar" ([`ProgressBar`]).
 //!
-//! The `serde` feature derives `Serialize` and `Deserialize` for the option
-//! enums, using snake_case names such as `"high_byte"`.
+//! Colours are RGB565; [`rgb565`] converts `0xRRGGBB`. [`key`] has the key
+//! codes keyboards send.
 //!
 //! ```no_run
-//! use degus_controls::{Area, Controls, DataVar, IconVar, KeyCode, Point, Touch};
+//! use degus_controls::{Area, Controls, DataVar, IconVar, KeyCode, Point, Touch, rgb565};
 //!
 //! let mut controls = Controls::new();
 //! let start = controls.page_mut(0);
 //! start
 //!     .touch
-//!     .push(Touch::new(Area::new(1648, 848, 1798, 998), KeyCode::new(0xBA00, 2)));
+//!     .push(Touch::new(Area::sized(1648, 848, 150, 150), KeyCode::new(0xBA00, 2)));
 //! start.display.push(
 //!     IconVar {
 //!         vp: 0x1000,
@@ -37,6 +37,7 @@
 //!     DataVar {
 //!         vp: 0x120A,
 //!         position: Point::new(632, 87),
+//!         color: rgb565(0xFF0000),
 //!         font_size: 24,
 //!         integer_digits: 3,
 //!         ..DataVar::default()
@@ -44,20 +45,23 @@
 //!     .into(),
 //! );
 //!
-//! let files = controls.build()?;
+//! let files = controls.to_bytes()?;
 //! std::fs::write(format!("DWIN_SET/{}", degus_controls::TOUCH_FILE_NAME), &files.touch)?;
 //! std::fs::write(format!("DWIN_SET/{}", degus_controls::DISPLAY_FILE_NAME), &files.display)?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
+mod color;
 mod controls;
 mod display;
 mod error;
 mod geom;
+pub mod key;
 mod touch;
 
+pub use color::rgb565;
 pub use controls::{
-    BuiltControls, Controls, DISPLAY_FILE_NAME, MAX_DISPLAYS_PER_PAGE, MAX_PAGES, PageControls,
+    ControlFiles, Controls, DISPLAY_FILE_NAME, MAX_DISPLAYS_PER_PAGE, MAX_PAGES, PageControls,
     TOUCH_FILE_NAME,
 };
 pub use display::{

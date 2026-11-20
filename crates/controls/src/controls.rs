@@ -43,9 +43,9 @@ pub struct Controls {
     pages: BTreeMap<u16, PageControls>,
 }
 
-/// The two generated files.
+/// Files 13 and 14, as [`Controls::to_bytes`] writes them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BuiltControls {
+pub struct ControlFiles {
     /// File 13, [`TOUCH_FILE_NAME`].
     pub touch: Vec<u8>,
     /// File 14, [`DISPLAY_FILE_NAME`].
@@ -88,12 +88,12 @@ impl Controls {
         self.pages.is_empty()
     }
 
-    /// Generates files 13 and 14.
-    pub fn build(&self) -> Result<BuiltControls> {
+    /// Writes files 13 and 14.
+    pub fn to_bytes(&self) -> Result<ControlFiles> {
         if let Some(&page) = self.pages.keys().find(|&&id| id >= MAX_PAGES) {
             return Err(Error::PageId { page });
         }
-        Ok(BuiltControls {
+        Ok(ControlFiles {
             touch: self.touch_file()?,
             display: self.display_file()?,
         })
@@ -103,8 +103,8 @@ impl Controls {
     fn touch_file(&self) -> Result<Vec<u8>> {
         let mut out = Vec::new();
         for (&id, page) in &self.pages {
-            for touch in &page.touch {
-                touch.encode(id, &mut out)?;
+            for (index, touch) in page.touch.iter().enumerate() {
+                touch.encode(id, index, &mut out)?;
             }
         }
         out.extend_from_slice(&TOUCH_END);
@@ -134,8 +134,8 @@ impl Controls {
             }
             out.push(display.len() as u8);
             out.extend_from_slice(&(offset as u32).to_be_bytes()[1..]);
-            for control in display {
-                records.extend_from_slice(&control.encode(id)?);
+            for (index, control) in display.iter().enumerate() {
+                records.extend_from_slice(&control.encode(id, index)?);
             }
         }
         out.extend_from_slice(&records);

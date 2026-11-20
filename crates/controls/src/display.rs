@@ -118,11 +118,6 @@ impl Default for IconVar {
 
 /// How an icon is layered over the page ("Background transparent Mode").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(rename_all = "snake_case")
-)]
 #[repr(u8)]
 pub enum LayerMode {
     #[default]
@@ -180,11 +175,6 @@ impl Default for DataVar {
 
 /// Alignment of a data variable around its position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(rename_all = "snake_case")
-)]
 #[repr(u8)]
 pub enum Align {
     #[default]
@@ -195,11 +185,6 @@ pub enum Align {
 
 /// How a data variable reads its VP.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(rename_all = "snake_case")
-)]
 #[repr(u8)]
 pub enum DataType {
     /// Signed 16-bit.
@@ -272,11 +257,6 @@ impl Default for TextVar {
 
 /// Character encoding of a text display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(rename_all = "snake_case")
-)]
 #[repr(u8)]
 pub enum Encoding {
     /// One byte per character.
@@ -292,11 +272,6 @@ pub enum Encoding {
 
 /// Horizontal alignment of a text display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(rename_all = "snake_case")
-)]
 #[repr(u8)]
 pub enum TextAlign {
     #[default]
@@ -308,11 +283,6 @@ pub enum TextAlign {
 
 /// Vertical alignment of a text display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(rename_all = "snake_case")
-)]
 #[repr(u8)]
 pub enum VerticalAlign {
     #[default]
@@ -353,11 +323,6 @@ pub struct ProgressBar {
 
 /// How a progress bar reads its VP.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(rename_all = "snake_case")
-)]
 #[repr(u8)]
 pub enum BarDataType {
     /// Signed 16-bit.
@@ -371,11 +336,6 @@ pub enum BarDataType {
 
 /// The direction a progress bar grows in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(rename_all = "snake_case")
-)]
 #[repr(u8)]
 pub enum BarDirection {
     #[default]
@@ -386,7 +346,8 @@ pub enum BarDirection {
 }
 
 impl Display {
-    pub(crate) fn encode(&self, page: u16) -> Result<Record> {
+    /// The record of display control `index` of `page`.
+    pub(crate) fn encode(&self, page: u16, index: usize) -> Result<Record> {
         Ok(match self {
             Display::Icon(icon) => {
                 let mut r = header(ICON, ICON_LEN, icon.sp, icon.popup_menu);
@@ -409,6 +370,7 @@ impl Display {
                 if unit.len() > UNIT_MAX || !data.unit.is_ascii() {
                     return Err(Error::Unit {
                         page,
+                        index,
                         unit: data.unit.clone(),
                     });
                 }

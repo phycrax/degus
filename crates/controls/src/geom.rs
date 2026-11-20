@@ -36,6 +36,11 @@ impl Area {
         }
     }
 
+    /// The area of `w` × `h` pixels whose top left corner is `(x, y)`.
+    pub const fn sized(x: u16, y: u16, w: u16, h: u16) -> Self {
+        Self::new(x, y, x.saturating_add(w), y.saturating_add(h))
+    }
+
     pub const fn top_left(self) -> Point {
         Point::new(self.left, self.top)
     }

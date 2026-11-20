@@ -125,11 +125,6 @@ impl KeyCode {
 
 /// Where a key code is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(rename_all = "snake_case")
-)]
 pub enum KeyTarget {
     /// The whole VP word.
     #[default]
@@ -143,13 +138,13 @@ pub enum KeyTarget {
 }
 
 impl KeyTarget {
-    fn code(self, page: u16) -> Result<u8> {
+    fn code(self, page: u16, index: usize) -> Result<u8> {
         match self {
             Self::Word => Ok(0),
             Self::HighByte => Ok(1),
             Self::LowByte => Ok(2),
             Self::Bit(bit @ 0..=15) => Ok(0x10 + bit),
-            Self::Bit(bit) => Err(Error::BitIndex { page, bit }),
+            Self::Bit(bit) => Err(Error::BitIndex { page, index, bit }),
         }
     }
 }
@@ -218,11 +213,6 @@ impl Default for DataInput {
 
 /// How a data input writes its VP.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(rename_all = "snake_case")
-)]
 #[repr(u8)]
 pub enum InputDataType {
     /// Signed 16-bit.
@@ -242,11 +232,6 @@ pub enum InputDataType {
 
 /// Colour of a data input's cursor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(rename_all = "snake_case")
-)]
 #[repr(u8)]
 pub enum CursorColor {
     #[default]
@@ -270,8 +255,8 @@ pub enum Keyboard {
 }
 
 impl Touch {
-    /// Appends this control's record for `page` to `out`.
-    pub(crate) fn encode(&self, page: u16, out: &mut Vec<u8>) -> Result<()> {
+    /// Appends the record of touch control `index` of `page` to `out`.
+    pub(crate) fn encode(&self, page: u16, index: usize, out: &mut Vec<u8>) -> Result<()> {
         let mut r = [0u8; MAX_LEN];
         put_u16(&mut r, 0, page);
         self.area.write(&mut r, 2);
@@ -280,7 +265,7 @@ impl Touch {
         match &self.action {
             &TouchAction::Basic(code) => {
                 if matches!(code.to_be_bytes()[0], UPLOAD | NO_UPLOAD) {
-                    return Err(Error::BasicKey { page, code });
+                    return Err(Error::BasicKey { page, index, code });
                 }
                 put_u16(&mut r, 14, code);
             }
@@ -288,7 +273,7 @@ impl Touch {
                 r[14] = prefix(key.upload);
                 r[15] = KEY_CODE;
                 put_u16(&mut r, 17, key.vp);
-                r[19] = key.target.code(page)?;
+                r[19] = key.target.code(page, index)?;
                 put_u16(&mut r, 20, key.value);
                 r[22] = key.hold_time;
             }
