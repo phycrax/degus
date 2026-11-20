@@ -1,6 +1,6 @@
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// Errors produced while building a configuration file.
+/// Errors produced while writing or reading a configuration file.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("{field} is {value}, not in {min}-{max}")]
@@ -12,4 +12,8 @@ pub enum Error {
     },
     #[error("sd_folder {0:?} must be 1-8 characters of 0-9, A-Z, a-z, _ and -")]
     SdFolder(String),
+    #[error("not a T5LCFG.CFG file: it does not start with T5LC1")]
+    Magic,
+    #[error("a T5LCFG.CFG file holds at least 16 bytes, not {0}")]
+    TooShort(usize),
 }

@@ -38,7 +38,8 @@ const PICTURE_REPLACE: usize = 0x32;
 const SD_FOLDER: usize = 0x40;
 const BACKLIGHT_DELAY: usize = 0x70;
 
-/// The contents of `T5LCFG.CFG`.
+/// The contents of `T5LCFG.CFG`. [`Config::to_bytes`] writes the file and
+/// [`Config::from_bytes`] reads one.
 ///
 /// The fields up to `standby_delay` are the system settings at 0x05-0x0F,
 /// which the display applies from every file. Each `Option` after them is a
@@ -378,6 +379,102 @@ impl Config {
         Ok(b)
     }
 
+    /// Reads a file. A file shorter than [`FILE_LEN`] reads as if padded
+    /// with zeros, as DWIN's files often end early; reserved bytes are not
+    /// kept.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Config> {
+        if bytes.len() < LCD {
+            return Err(Error::TooShort(bytes.len()));
+        }
+        if !bytes.starts_with(MAGIC) {
+            return Err(Error::Magic);
+        }
+        let mut b = [0; FILE_LEN];
+        let len = bytes.len().min(FILE_LEN);
+        b[..len].copy_from_slice(&bytes[..len]);
+        let bit = |at: usize, index: u8| b[at] & (1 << index) != 0;
+        let on = |at: usize| b[at] == ON;
+        let byte_block = |at: usize| on(at).then_some(b[at + 1]);
+        Ok(Config {
+            crc: bit(FLAGS, 7),
+            audio: if bit(FLAGS, 6) {
+                Audio::Music
+            } else {
+                Audio::Buzzer
+            },
+            load_22: bit(FLAGS, 5),
+            auto_upload: bit(FLAGS, 4),
+            touch_sound: bit(FLAGS, 3),
+            standby: bit(FLAGS, 2),
+            rotation: match b[FLAGS] & 0x03 {
+                0 => Rotation::Deg0,
+                1 => Rotation::Deg90,
+                2 => Rotation::Deg180,
+                _ => Rotation::Deg270,
+            },
+            pwm_backlight: bit(FLAGS2, 7),
+            nand_flash: bit(FLAGS2, 6).then(|| {
+                if bit(FLAGS2, 4) {
+                    NandSize::Gbit4
+                } else {
+                    NandSize::Gbit1
+                }
+            }),
+            format_nand_flash: bit(FLAGS2, 5),
+            erase_internal_flash: bit(FLAGS2, 3),
+            adc_16bit: bit(FLAGS2, 2),
+            encrypt_8051: bit(FLAGS2, 1),
+            run_os_during_download: bit(FLAGS2, 0),
+            music_wae: b[MUSIC_WAE],
+            background_icl: b[BACKGROUND_ICL],
+            touch_report_div: b[TOUCH_REPORT_DIV],
+            baud_divisor: get_u16(&b, BAUD),
+            brightness: b[BRIGHTNESS],
+            standby_brightness: b[STANDBY_BRIGHTNESS],
+            standby_delay: get_u16(&b, STANDBY_DELAY),
+            lcd: (b[LCD..LCD + 2] == ON2).then(|| Lcd {
+                pclk_phs: b[LCD + 2],
+                pclk_div: b[LCD + 3],
+                h_w: b[LCD + 4],
+                h_s: b[LCD + 5],
+                h_d: get_u16(&b, LCD + 6),
+                h_e: b[LCD + 8],
+                v_w: b[LCD + 9],
+                v_s: b[LCD + 10],
+                v_d: get_u16(&b, LCD + 11),
+                v_e: b[LCD + 13],
+                tcon_sel: b[LCD + 14],
+            }),
+            touch_panel: on(TOUCH_PANEL).then(|| TouchPanel {
+                mode: b[TOUCH_PANEL + 1],
+                sense: b[TOUCH_PANEL + 2],
+                freq: b[TOUCH_PANEL + 3],
+            }),
+            clock_out: on(CLOCK_OUT).then(|| ClockOut {
+                enabled: b[CLOCK_OUT + 1] == ON,
+                div: b[CLOCK_OUT + 2],
+            }),
+            buzzer: on(BUZZER).then(|| Buzzer {
+                div1: b[BUZZER + 1],
+                div2: get_u16(&b, BUZZER + 2),
+                duty: get_u16(&b, BUZZER + 4),
+                time: b[BUZZER + 6],
+            }),
+            init_file: byte_block(INIT_FILE),
+            sysclk_adjust: byte_block(SYSCLK).map(|adjust| adjust as i8),
+            picture_replace_icl: byte_block(PICTURE_REPLACE),
+            // DWIN's tools mark the block `5A 5A` rather than the guide's
+            // `5A A5`.
+            sd_folder: (b[SD_FOLDER..SD_FOLDER + 2] == ON2
+                || b[SD_FOLDER..SD_FOLDER + 2] == [ON, ON])
+            .then(|| {
+                let len = usize::from(b[SD_FOLDER + 2]).min(MAX_SD_FOLDER);
+                String::from_utf8_lossy(&b[SD_FOLDER + 3..][..len]).into_owned()
+            }),
+            backlight_delay: byte_block(BACKLIGHT_DELAY),
+        })
+    }
+
     fn validate(&self) -> Result<()> {
         range("music_wae", self.music_wae, 0, 63)?;
         range("background_icl", self.background_icl, 16, 63)?;
@@ -442,4 +539,8 @@ fn bit(on: bool, index: u8) -> u8 {
 
 fn put_u16(b: &mut [u8], at: usize, value: u16) {
     b[at..at + 2].copy_from_slice(&value.to_be_bytes());
+}
+
+fn get_u16(b: &[u8], at: usize) -> u16 {
+    u16::from_be_bytes([b[at], b[at + 1]])
 }

@@ -1,4 +1,4 @@
-//! Builds the hardware configuration file of DWIN T5L displays,
+//! Writes and reads the hardware configuration file of DWIN T5L displays,
 //! `T5LCFG.CFG`: the system settings the display applies from every file
 //! (UART, backlight, rotation, the ICL holding page backgrounds, …) and the
 //! blocks after them, each with its own enable marker (LCD timing, touch

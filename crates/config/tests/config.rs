@@ -40,9 +40,9 @@ fn system_settings_match_the_template_shipped_with_the_dgus_editor() {
     assert_eq!(file[..0x10], template[..0x10]);
 }
 
-#[test]
-fn writes_every_block() {
-    let config = Config {
+/// A configuration with every block enabled.
+fn every_block() -> Config {
+    Config {
         crc: true,
         audio: Audio::Music,
         load_22: true,
@@ -92,8 +92,12 @@ fn writes_every_block() {
         picture_replace_icl: Some(33),
         sd_folder: Some("RGZN_SET".into()),
         backlight_delay: Some(0x0A),
-    };
-    let file = config.to_bytes().unwrap();
+    }
+}
+
+#[test]
+fn writes_every_block() {
+    let file = every_block().to_bytes().unwrap();
     assert_eq!(file.len(), FILE_LEN);
     assert_eq!(
         file[..0x50],
@@ -159,4 +163,60 @@ fn rejects_values_out_of_range() {
         .to_bytes(),
         Err(Error::SdFolder(_))
     );
+}
+
+#[test]
+fn reads_what_it_writes() {
+    let configs = [
+        Config::default(),
+        every_block(),
+        Config {
+            clock_out: Some(ClockOut {
+                enabled: true,
+                div: 1,
+            }),
+            nand_flash: Some(NandSize::Gbit1),
+            rotation: Rotation::Deg90,
+            sysclk_adjust: Some(2),
+            ..Config::default()
+        },
+    ];
+    for config in configs {
+        let file = config.to_bytes().unwrap();
+        assert_eq!(Config::from_bytes(&file).unwrap(), config);
+    }
+}
+
+#[test]
+fn reads_short_files_from_dwins_tools() {
+    // The DGUS editor's 36-byte template: its LCD timing sits behind a
+    // disabled marker.
+    let template = hex!(
+        "5435 4c43 3138 0000 2028 001c 4000 0000"
+        "0000 0106 1e10 0320 d203 1401 e00c 0000"
+        "000f 1000"
+    );
+    assert_eq!(
+        Config::from_bytes(&template).unwrap(),
+        Config {
+            load_22: true,
+            brightness: 0x40,
+            standby_delay: 0,
+            ..Config::default()
+        }
+    );
+
+    // DWIN's tools mark the SD folder block `5A 5A`.
+    let mut file = Config::default().to_bytes().unwrap();
+    file[0x40..0x46].copy_from_slice(&hex!("5a5a 03 414243"));
+    assert_eq!(
+        Config::from_bytes(&file).unwrap().sd_folder.as_deref(),
+        Some("ABC")
+    );
+}
+
+#[test]
+fn rejects_what_is_not_a_configuration() {
+    assert_matches!(Config::from_bytes(b"T5LC1"), Err(Error::TooShort(5)));
+    assert_matches!(Config::from_bytes(&[0; 0x80]), Err(Error::Magic));
 }
