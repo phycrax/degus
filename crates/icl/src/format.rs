@@ -23,6 +23,8 @@ pub(crate) const HEADER_LEN: usize = 16;
 pub(crate) const RECORD_HEADER_LEN: usize = 10;
 /// The CRC and length fields cover everything from this offset on.
 pub(crate) const CRC_START: usize = 8;
+/// Flash bytes per file number: the display stores file N at N × 256 KB.
+pub(crate) const SLOT_SIZE: u64 = 256 * 1024;
 /// An icon record must not straddle a multiple of this flash address.
 pub(crate) const FLASH_BANK_SIZE: u64 = 16 * 1024 * 1024;
 

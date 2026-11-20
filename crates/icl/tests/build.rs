@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crc::{CRC_16_MODBUS, Crc};
 use degus_icl::{
-    Chip, Error, FlashSlot, IclBuilder, IclOptions, IconSource, OversizePolicy, Subsampling,
+    Chip, Error, Icl, IclBuilder, IclOptions, IconSource, OversizePolicy, Subsampling,
 };
 use image::{DynamicImage, Rgb, RgbImage, Rgba, RgbaImage};
 
@@ -129,27 +129,26 @@ fn builds_icl_with_id_gaps() {
         for (id, image) in &sources {
             builder.insert(*id, IconSource::Image(image.clone()));
         }
-        let built = builder.build().unwrap();
-        let (max_id, icons) = records(&built.bytes);
+        let icl = builder.build().unwrap();
+        let bytes = icl.to_bytes(32).unwrap();
+        let (max_id, records) = records(&bytes);
 
         assert_eq!(max_id, 7);
-        assert_eq!(icons.iter().map(|i| i.id).collect::<Vec<_>>(), [0, 3, 7]);
-        assert_eq!(built.icons.len(), 3);
-        for ((id, image), (icon, report)) in sources.iter().zip(icons.iter().zip(&built.icons)) {
-            assert_eq!(icon.id, *id);
-            assert_eq!(
-                (icon.width, icon.height),
-                (image.width() as u16, image.height() as u16)
-            );
-            assert_eq!(icon.offset, report.offset as usize);
-            assert_eq!(report.quality, Some(90));
+        assert_eq!(icl.icons.keys().copied().collect::<Vec<_>>(), [0, 3, 7]);
+        assert_eq!(records.iter().map(|r| r.id).collect::<Vec<_>>(), [0, 3, 7]);
+        for ((id, image), record) in sources.iter().zip(&records) {
+            let icon = &icl.icons[id];
+            let size = (image.width() as u16, image.height() as u16);
+            assert_eq!((icon.width(), icon.height()), size);
+            assert_eq!((record.width, record.height), size);
+            assert_eq!(icon.jpeg(), record.jpeg());
             // Records and their scan data are 4-byte aligned.
-            assert_eq!(icon.offset % 4, 0);
-            assert_eq!((icon.offset + 10 + icon.header_len) % 4, 0);
-            assert!(mean_abs_diff(&icon.decode(), &image.to_rgb8()) < 6.0);
+            assert_eq!(record.offset % 4, 0);
+            assert_eq!((record.offset + 10 + record.header_len) % 4, 0);
+            assert!(mean_abs_diff(&record.decode(), &image.to_rgb8()) < 6.0);
         }
         // The first record follows the 16-byte header and 8 table entries.
-        assert_eq!(icons[0].offset, 16 + 4 * 8);
+        assert_eq!(records[0].offset, 16 + 4 * 8);
     }
 }
 
@@ -161,7 +160,7 @@ fn blends_transparency_onto_background() {
         ..IclOptions::default()
     });
     builder.insert(1, IconSource::Image(image));
-    let bytes = builder.build().unwrap().bytes;
+    let bytes = builder.build().unwrap().to_bytes(32).unwrap();
     let pixel = *record(&bytes, 1).decode().get_pixel(8, 8);
     assert!(pixel[0] < 8 && pixel[1] < 8 && pixel[2] > 247, "{pixel:?}");
 }
@@ -184,21 +183,17 @@ fn passthrough_keeps_compatible_jpegs() {
             ..IclOptions::default()
         });
         builder.insert(2, IconSource::Encoded(jpeg.to_vec()));
-        let built = builder.build().unwrap();
-        (record(&built.bytes, 2).jpeg(), built.icons[0].quality)
+        builder.build().unwrap().icons[&2].jpeg()
     };
     // Passthrough only rewrites the header into libjpeg's layout...
-    let (stored, quality) = build(&jpeg, true);
-    assert_eq!(quality, None);
+    let stored = build(&jpeg, true);
     assert_eq!(
         image::load_from_memory(&stored).unwrap().to_rgb8(),
         image::load_from_memory(&jpeg).unwrap().to_rgb8()
     );
     // ...so a JPEG already in that layout is stored unchanged.
-    assert_eq!(build(&stored, true).0, stored);
-    let (encoded, quality) = build(&stored, false);
-    assert_ne!(encoded, stored);
-    assert_eq!(quality, Some(IclOptions::default().quality));
+    assert_eq!(build(&stored, true), stored);
+    assert_ne!(build(&stored, false), stored);
 }
 
 #[test]
@@ -217,81 +212,47 @@ fn oversized_icons_fail_or_reduce_quality() {
     builder.insert(0, IconSource::Image(noise(400, 300, 1)));
     assert!(is_oversize(builder.build()));
 
-    // Retries in steps of 1 until the icon fits.
     builder.options.oversize = OversizePolicy::reduce_quality();
-    let built = builder.build().unwrap();
-    let quality = built.icons[0].quality.unwrap();
-    assert!(
-        quality < 99,
-        "expected several retries, got quality {quality}"
-    );
-    assert!(built.icons[0].size <= 10 + Chip::T5L1.max_jpeg_size() + 11);
-
-    // One step higher would not have fitted.
-    builder.options.oversize = OversizePolicy::Error;
-    builder.options.quality = quality + 1;
-    assert!(is_oversize(builder.build()));
+    let icl = builder.build().unwrap();
+    assert!(icl.icons[&0].jpeg().len() <= Chip::T5L1.max_jpeg_size());
 }
 
 #[test]
-fn head_and_body_alignment() {
-    let mut builder = IclBuilder::new(IclOptions {
-        head_align: 64 * 1024,
-        body_align: 512,
-        ..IclOptions::default()
-    });
-    builder.insert(0, IconSource::Image(gradient(30, 20)));
-    builder.insert(5, IconSource::Image(gradient(50, 10)));
-    let built = builder.build().unwrap();
-    let (_, icons) = records(&built.bytes);
-    assert_eq!(icons[0].offset, 64 * 1024);
-    for report in &built.icons {
-        assert_eq!(report.size % 512, 0);
-    }
-    assert_eq!(icons[1].offset, 64 * 1024 + built.icons[0].size);
-    assert_eq!(
-        built.bytes.len(),
-        64 * 1024 + built.icons.iter().map(|r| r.size).sum::<usize>()
-    );
-    icons[1].decode();
-}
-
-#[test]
-fn flash_slot_keeps_records_within_16mb_banks() {
-    // Slot 63 sits 256 KB below the first 16 MB boundary.
-    let slot = FlashSlot::new(63);
+fn records_stay_within_16mb_flash_banks() {
     let mut builder = IclBuilder::new(IclOptions {
         quality: 100,
         subsampling: Subsampling::S444,
         chip: Chip::T5L2,
-        flash_slot: Some(slot),
         ..IclOptions::default()
     });
     for id in 0..4 {
         builder.insert(id, IconSource::Image(noise(160, 120, u32::from(id))));
     }
-    let built = builder.build().unwrap();
-    let base = u64::from(slot.id) * u64::from(slot.size);
+    let icl = builder.build().unwrap();
+    // File 63 sits 256 KB below the first 16 MB boundary.
+    let bytes = icl.to_bytes(63).unwrap();
+    let base = 63 * 256 * 1024;
     let bank = 16 << 20;
     let mut padded = false;
-    for report in &built.icons {
-        let start = base + u64::from(report.offset);
-        let last = start + report.size as u64 - 1;
+    for record in records(&bytes).1 {
+        let start = base + record.offset;
+        let last = start + 10 + record.payload.len() - 1;
         assert_eq!(
             start / bank,
             last / bank,
             "icon {} straddles a bank",
-            report.id
+            record.id
         );
         padded |= start % bank == 0;
+        record.decode();
     }
     assert!(
         padded,
         "test images should force one record onto the boundary"
     );
-    for icon in records(&built.bytes).1 {
-        icon.decode();
-    }
+    // Elsewhere, the same icons need no padding.
+    let unpadded = icl.to_bytes(32).unwrap();
+    assert!(unpadded.len() < bytes.len());
 }
 
 #[test]
@@ -302,9 +263,8 @@ fn file_sources_are_read_from_disk() {
 
     let mut builder = IclBuilder::new(IclOptions::default());
     builder.insert(5, IconSource::File(dir.join("logo.png")));
-    let bytes = builder.build().unwrap().bytes;
-    let icon = record(&bytes, 5);
-    assert_eq!((icon.width, icon.height), (12, 8));
+    let icl = builder.build().unwrap();
+    assert_eq!((icl.icons[&5].width(), icl.icons[&5].height()), (12, 8));
 
     builder.insert(6, IconSource::File(dir.join("missing.png")));
     assert!(matches!(
@@ -314,6 +274,8 @@ fn file_sources_are_read_from_disk() {
 }
 
 #[test]
-fn rejects_an_empty_builder() {
-    assert!(matches!(IclBuilder::default().build(), Err(Error::Empty)));
+fn an_empty_icl_cannot_be_written() {
+    let icl = IclBuilder::default().build().unwrap();
+    assert_eq!(icl, Icl::new());
+    assert!(matches!(icl.to_bytes(32), Err(Error::Empty)));
 }

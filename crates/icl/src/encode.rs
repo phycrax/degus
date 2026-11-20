@@ -8,15 +8,7 @@ use crate::error::{Error, Result};
 use crate::jpeg::{self, PreparedJpeg};
 use crate::options::{IclOptions, OversizePolicy, Subsampling};
 
-/// A prepared icon and the JPEG quality it was encoded at (`None` when the
-/// source JPEG was stored unchanged).
-#[derive(Debug)]
-pub(crate) struct Encoded {
-    pub jpeg: PreparedJpeg,
-    pub quality: Option<u8>,
-}
-
-pub(crate) fn encode_source(source: &IconSource, options: &IclOptions) -> Result<Encoded> {
+pub(crate) fn encode_source(source: &IconSource, options: &IclOptions) -> Result<PreparedJpeg> {
     let limit = options.chip.max_jpeg_size();
     match source {
         IconSource::File(path) => {
@@ -27,30 +19,29 @@ pub(crate) fn encode_source(source: &IconSource, options: &IclOptions) -> Result
             encode_bytes(&bytes, options, limit)
         }
         IconSource::Encoded(bytes) => encode_bytes(bytes, options, limit),
-        IconSource::Image(image) => encode_image(image, options, limit),
-        IconSource::Jpeg(bytes) => Ok(Encoded {
-            jpeg: jpeg::prepare(bytes, limit)?,
-            quality: None,
-        }),
+        IconSource::Image(image) => Ok(encode_image(image, options, limit)?.0),
+        IconSource::Jpeg(bytes) => jpeg::prepare(bytes, limit),
     }
 }
 
-fn encode_bytes(bytes: &[u8], options: &IclOptions, limit: usize) -> Result<Encoded> {
+fn encode_bytes(bytes: &[u8], options: &IclOptions, limit: usize) -> Result<PreparedJpeg> {
     if options.passthrough_jpeg && bytes.starts_with(&[0xFF, 0xD8]) {
         // Layouts the T5L cannot decode, or that are too large, get re-encoded.
         if let Ok(jpeg) = jpeg::prepare(bytes, limit) {
-            return Ok(Encoded {
-                jpeg,
-                quality: None,
-            });
+            return Ok(jpeg);
         }
     }
-    encode_image(&image::load_from_memory(bytes)?, options, limit)
+    Ok(encode_image(&image::load_from_memory(bytes)?, options, limit)?.0)
 }
 
 /// Encodes `image`, retrying at lower quality per [`IclOptions::oversize`]
-/// while the JPEG exceeds `limit` bytes.
-fn encode_image(image: &DynamicImage, options: &IclOptions, limit: usize) -> Result<Encoded> {
+/// while the JPEG exceeds `limit` bytes. Returns the JPEG and the quality it
+/// was encoded at.
+fn encode_image(
+    image: &DynamicImage,
+    options: &IclOptions,
+    limit: usize,
+) -> Result<(PreparedJpeg, u8)> {
     let (width, height) = image.dimensions();
     let too_large = || Error::ImageTooLarge { width, height };
     let w = u16::try_from(width).map_err(|_| too_large())?;
@@ -68,20 +59,14 @@ fn encode_image(image: &DynamicImage, options: &IclOptions, limit: usize) -> Res
             Err(Error::IconTooLarge { .. }) if step > 0 && quality > 1 => {
                 quality = quality.saturating_sub(step).max(1);
             }
-            result => {
-                return result.map(|jpeg| Encoded {
-                    jpeg,
-                    quality: Some(quality),
-                });
-            }
+            result => return result.map(|jpeg| (jpeg, quality)),
         }
     }
 }
 
-/// Returns packed RGB8 pixels, blending any alpha onto `background`, as
-/// the build does before encoding: an ICL has no transparency.
-/// [`IclOptions::background`] is the colour the build uses.
-pub fn flatten(image: &DynamicImage, background: [u8; 3]) -> Vec<u8> {
+/// Returns packed RGB8 pixels, blending any alpha onto `background`: an
+/// ICL has no transparency.
+pub(crate) fn flatten(image: &DynamicImage, background: [u8; 3]) -> Vec<u8> {
     if !image.color().has_alpha() {
         return image.to_rgb8().into_raw();
     }
@@ -169,10 +154,7 @@ mod tests {
             Err(Error::IconTooLarge { .. })
         );
         // Step 1 settles on the highest quality that fits.
-        let quality = encode(OversizePolicy::reduce_quality())
-            .unwrap()
-            .quality
-            .unwrap();
+        let quality = encode(OversizePolicy::reduce_quality()).unwrap().1;
         assert!(size_at(quality) <= limit);
         assert!(
             (quality + 1..=90).all(|q| size_at(q) > limit),
@@ -180,8 +162,8 @@ mod tests {
         );
         // Larger steps try 90, 80, 70, ...
         let quality = encode(OversizePolicy::ReduceQuality { step: 10 })
-            .unwrap()
-            .quality;
+            .ok()
+            .map(|(_, quality)| quality);
         let expected = (60..=90).rev().step_by(10).find(|&q| size_at(q) <= limit);
         assert_eq!(quality, expected);
     }

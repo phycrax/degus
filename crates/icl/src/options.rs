@@ -59,28 +59,6 @@ impl OversizePolicy {
     }
 }
 
-/// Where the ICL file will live in T5L flash: file `id` starts at
-/// `id * size` bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FlashSlot {
-    /// File ID, the leading number of the ICL file name (32 for `32.icl`).
-    pub id: u16,
-    /// Bytes of flash per file ID ("Lib Size" in DWIN's tools: 256 KB or
-    /// 512 KB).
-    pub size: u32,
-}
-
-impl FlashSlot {
-    pub const DEFAULT_SIZE: u32 = 256 * 1024;
-
-    pub const fn new(id: u16) -> Self {
-        Self {
-            id,
-            size: Self::DEFAULT_SIZE,
-        }
-    }
-}
-
 /// Settings for converting images into ICL icons.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IclOptions {
@@ -96,17 +74,6 @@ pub struct IclOptions {
     pub background: [u8; 3],
     pub chip: Chip,
     pub oversize: OversizePolicy,
-    /// Start the first icon record at a multiple of this many bytes
-    /// ("Align Head" in DWIN's tools: 64 KB or 0). 0 places it right after the
-    /// offset table.
-    pub head_align: u32,
-    /// Zero-pad every icon record to a multiple of this many bytes
-    /// ("Align Body" in DWIN's tools: 100, 10, 1, 0.5 KB or 0). 0 disables
-    /// padding.
-    pub body_align: u32,
-    /// When set, zero padding is inserted so that no icon record straddles a
-    /// 16 MB flash boundary once the file is downloaded to this slot.
-    pub flash_slot: Option<FlashSlot>,
 }
 
 impl Default for IclOptions {
@@ -118,9 +85,6 @@ impl Default for IclOptions {
             background: [0xFF, 0xFF, 0xFF],
             chip: Chip::default(),
             oversize: OversizePolicy::default(),
-            head_align: 0,
-            body_align: 0,
-            flash_slot: None,
         }
     }
 }
