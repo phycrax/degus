@@ -1,12 +1,12 @@
-//! Builds DWIN T5L WAE audio libraries (`DGUS_2` format).
+//! Builds and reads DWIN T5L WAE audio libraries (`DGUS_2` format).
 //!
 //! A WAE file is a 16-byte header, a table of `(offset, length)` entries
 //! indexed by clip ID, and the clips themselves: mono 32 kHz audio, stored
 //! as 16-bit PCM or DWIN's 8-bit "12:8" companding. The header
 //! and every clip start on a 4 KB boundary.
 //!
-//! [`WaeBuilder`] converts audio files into a [`Wae`], and [`Wae::to_bytes`]
-//! writes the file.
+//! [`WaeBuilder`] converts audio files into a [`Wae`], [`Wae::to_bytes`]
+//! writes the file and [`Wae::from_bytes`] reads one.
 //!
 //! ```no_run
 //! use degus_wae::{ClipSource, SampleFormat, WaeBuilder, WaeOptions};

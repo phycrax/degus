@@ -21,6 +21,15 @@ impl SampleFormat {
         }
     }
 
+    /// The format whose header value is `code`.
+    pub const fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(SampleFormat::Pcm16),
+            1 => Some(SampleFormat::Companded8),
+            _ => None,
+        }
+    }
+
     pub const fn bytes_per_sample(self) -> usize {
         match self {
             SampleFormat::Pcm16 => 2,

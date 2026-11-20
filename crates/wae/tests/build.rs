@@ -269,3 +269,41 @@ fn clips_hold_what_the_file_stores() {
     builder.insert(0, ClipSource::Raw(vec![0x01, 0x00, 0xFF, 0xFF]));
     assert_eq!(builder.build().unwrap().clips[&0], [1, -1]);
 }
+
+#[test]
+fn reads_what_it_writes() {
+    for format in [SampleFormat::Pcm16, SampleFormat::Companded8] {
+        let mut builder = WaeBuilder::new(WaeOptions {
+            format,
+            ..WaeOptions::default()
+        });
+        builder.insert(0, samples(32_000, &sine(32_000, 440.0, 0.1, 8000.0)));
+        builder.insert(2, samples(22_050, &sine(22_050, 1000.0, 0.05, 30000.0)));
+        builder.insert(600, samples(32_000, &[5; 10]));
+        let wae = builder.build().unwrap();
+        let bytes = wae.to_bytes().unwrap();
+        assert_eq!(Wae::from_bytes(&bytes).unwrap(), wae);
+    }
+}
+
+#[test]
+fn rejects_damaged_files() {
+    let mut builder = WaeBuilder::new(WaeOptions::default());
+    builder.insert(3, samples(32_000, &[1, 2, 3]));
+    let bytes = builder.build().unwrap().to_bytes().unwrap();
+    let damaged = |at: usize, value: u8| {
+        let mut bytes = bytes.clone();
+        bytes[at] = value;
+        Wae::from_bytes(&bytes)
+    };
+
+    assert!(matches!(Wae::from_bytes(b"DGUS_3"), Err(Error::NotWae)));
+    assert!(matches!(damaged(0, b'X'), Err(Error::NotWae)));
+    assert!(matches!(damaged(12, 2), Err(Error::Version(2))));
+    // A changed byte no longer matches the CRC.
+    assert!(matches!(damaged(4096, 0x55), Err(Error::Damaged(_))));
+    assert!(matches!(
+        Wae::from_bytes(&bytes[..bytes.len() - 1]),
+        Err(Error::Damaged(_))
+    ));
+}

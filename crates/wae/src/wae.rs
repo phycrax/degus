@@ -9,8 +9,8 @@ use crate::format::{CRC_START, ENTRY_LEN, HEADER_LEN, MAGIC, VERSION, checksum, 
 /// An audio library: mono clips at [`SAMPLE_RATE`](crate::SAMPLE_RATE), by
 /// ID.
 ///
-/// [`WaeBuilder`](crate::WaeBuilder) makes one from audio files, and
-/// [`Wae::to_bytes`] writes it as a file.
+/// [`WaeBuilder`](crate::WaeBuilder) makes one from audio files,
+/// [`Wae::to_bytes`] writes it as a file and [`Wae::from_bytes`] reads one.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Wae {
     /// How the file stores the samples. [`SampleFormat::Companded8`] rounds
@@ -26,6 +26,50 @@ impl Wae {
             format,
             clips: BTreeMap::new(),
         }
+    }
+
+    /// Reads a WAE file.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Wae> {
+        if bytes.len() < HEADER_LEN || bytes[..6] != MAGIC {
+            return Err(Error::NotWae);
+        }
+        if bytes[12] != VERSION {
+            return Err(Error::Version(bytes[12]));
+        }
+        if be32(bytes, 8) as usize != bytes.len() - CRC_START {
+            return Err(Error::Damaged("its length field does not match its length"));
+        }
+        if u16::from_le_bytes([bytes[6], bytes[7]]) != checksum(&bytes[CRC_START..]) {
+            return Err(Error::Damaged("its CRC does not match"));
+        }
+        let count = usize::from(u16::from_be_bytes([bytes[13], bytes[14]]));
+        let format = SampleFormat::from_code(bytes[15]).ok_or(Error::Format(bytes[15]))?;
+
+        // The table runs from the header to the first clip, which no entry
+        // seen so far may start inside.
+        let mut wae = Wae::new(format);
+        let mut table_end = bytes.len();
+        let mut id = 0;
+        while HEADER_LEN + ENTRY_LEN * (id + 1) <= table_end {
+            let at = HEADER_LEN + ENTRY_LEN * id;
+            let (offset, len) = (be32(bytes, at) as usize, be32(bytes, at + 4) as usize);
+            if offset != 0 {
+                if offset < at + ENTRY_LEN {
+                    return Err(Error::Damaged("a clip starts inside the table"));
+                }
+                table_end = table_end.min(offset);
+                let data = bytes
+                    .get(offset..offset + len)
+                    .ok_or(Error::Damaged("a clip runs past its end"))?;
+                let clip = u16::try_from(id).map_err(|_| Error::TooManyClips)?;
+                wae.clips.insert(clip, format.decode(data));
+            }
+            id += 1;
+        }
+        if wae.clips.len() != count {
+            return Err(Error::Damaged("its clip count does not match its table"));
+        }
+        Ok(wae)
     }
 
     /// Writes the WAE file.
@@ -62,4 +106,8 @@ impl Wae {
         bytes[6..8].copy_from_slice(&crc.to_le_bytes());
         Ok(bytes)
     }
+}
+
+fn be32(bytes: &[u8], at: usize) -> u32 {
+    u32::from_be_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
 }
