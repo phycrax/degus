@@ -1,5 +1,7 @@
-//! The project description: the project file, with its pages, and the
-//! controls files it lists.
+//! The project description. `project.toml` holds the settings of the whole
+//! project and includes other files; every file, `project.toml` too, holds
+//! declarations: pages, controls, libraries and files to copy. Which file a
+//! declaration is in means nothing to the build.
 //!
 //! Field names follow `degus-controls`. Geometry is written as `x, y, w, h`
 //! instead of the files' start and end corners.
@@ -24,41 +26,92 @@ use serde::{Deserialize, Deserializer, de};
 /// Name of the project file in a project folder.
 pub const PROJECT_FILE_NAME: &str = "project.toml";
 
-/// The project file: the screen, where the build goes and the libraries to
-/// build.
+/// `project.toml`: the [`Settings`], then [`Declarations`] like any file.
+/// [`RootFile::split`] separates them.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ProjectFile {
+pub struct RootFile {
+    pub screen: Size,
+    #[serde(default)]
+    pub chip: ChipKind,
+    #[serde(default = "default_output")]
+    pub output: PathBuf,
+    #[serde(default)]
+    pub include: Vec<PathBuf>,
+    pub config: Option<ConfigSpec>,
+    #[serde(default)]
+    pub copy: Vec<PathBuf>,
+    #[serde(default)]
+    pub icl: Vec<IclSpec>,
+    #[serde(default)]
+    pub wae: Vec<WaeSpec>,
+    #[serde(default)]
+    pub page: BTreeMap<String, PageSpec>,
+    #[serde(default)]
+    pub control: BTreeMap<String, Control>,
+}
+
+impl RootFile {
+    pub fn split(self) -> (Settings, Declarations) {
+        let settings = Settings {
+            screen: self.screen,
+            chip: self.chip,
+            output: self.output,
+            include: self.include,
+            config: self.config,
+        };
+        let declarations = Declarations {
+            copy: self.copy,
+            icl: self.icl,
+            wae: self.wae,
+            page: self.page,
+            control: self.control,
+        };
+        (settings, declarations)
+    }
+}
+
+/// What only `project.toml` sets: the device, the build and the other
+/// files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Settings {
     /// Screen size in pixels.
     pub screen: Size,
     /// Chip variant; sets the largest icon an ICL can hold.
-    #[serde(default)]
     pub chip: ChipKind,
     /// Folder the build writes `DWIN_SET` in, relative to the project root.
-    #[serde(default = "default_output")]
     pub output: PathBuf,
-    /// The controls files, relative to the project root. Each defines
-    /// controls by name, for pages to list.
-    #[serde(default)]
-    pub controls: Vec<PathBuf>,
-    /// The pages with controls.
-    #[serde(default)]
-    pub pages: Vec<PageSpec>,
-    /// Files copied into the output unchanged.
-    #[serde(default)]
-    pub copy: Vec<PathBuf>,
+    /// The other files of the project, relative to the project root.
+    pub include: Vec<PathBuf>,
     /// The hardware configuration file; none is written without it.
     pub config: Option<ConfigSpec>,
+}
+
+fn default_output() -> PathBuf {
+    "target".into()
+}
+
+/// What any file of a project declares. Names are unique across the files,
+/// one set for pages and one for controls.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Declarations {
+    /// Files copied into the output unchanged, relative to the project root.
+    #[serde(default)]
+    pub copy: Vec<PathBuf>,
     /// Icon libraries.
     #[serde(default)]
     pub icl: Vec<IclSpec>,
     /// Audio libraries.
     #[serde(default)]
     pub wae: Vec<WaeSpec>,
-}
-
-fn default_output() -> PathBuf {
-    "target".into()
+    /// `[page.<name>]` tables.
+    #[serde(default)]
+    pub page: BTreeMap<String, PageSpec>,
+    /// `[control.<name>]` tables. Their order means nothing; a page's list
+    /// sets the drawing order.
+    #[serde(default)]
+    pub control: BTreeMap<String, Control>,
 }
 
 /// `[config]`: the hardware configuration file, `T5LCFG.CFG`. Keys follow
@@ -366,11 +419,12 @@ impl From<DownmixKind> for Downmix {
     }
 }
 
-/// A page's entry in `pages`.
+/// A `[page.<name>]` table. Controls name pages; only this gives the ID.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PageSpec {
-    /// Page ID, below 4092. The page shows image `id` of the background ICL.
+    /// Page ID, below 4092: the page shows image `id` of the background ICL,
+    /// and the firmware switches to it by this ID.
     pub id: u16,
     /// Names of its controls, in drawing order. Touch and display controls
     /// may be mixed; the build keeps the order of each kind.
@@ -378,17 +432,7 @@ pub struct PageSpec {
     pub controls: Vec<String>,
 }
 
-/// A controls file: controls by name, for pages to list.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ControlsFile {
-    /// `[control.<name>]` tables. Their order in the file means nothing; a
-    /// page's list sets the drawing order.
-    #[serde(default, rename = "control")]
-    pub controls: BTreeMap<String, Control>,
-}
-
-/// A control, selected by its `type` key.
+/// A `[control.<name>]` table, selected by its `type` key.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Control {
@@ -532,10 +576,11 @@ impl<'de> Deserialize<'de> for Color {
 #[serde(deny_unknown_fields)]
 pub struct Button {
     pub area: Rect,
-    /// Page to switch to on release.
-    pub next_page: Option<u16>,
-    /// Page whose pixels show over the area while it is pressed.
-    pub pressed_page: Option<u16>,
+    /// Name of the page to switch to on release.
+    pub next_page: Option<String>,
+    /// Name of the page whose pixels show over the area while it is
+    /// pressed.
+    pub pressed_page: Option<String>,
     pub vp: u16,
     /// Which part of the VP receives `value`: `"word"`, `"high_byte"`,
     /// `"low_byte"` or `{ bit = n }`.
@@ -558,10 +603,11 @@ fn yes() -> bool {
 #[serde(deny_unknown_fields)]
 pub struct Key {
     pub area: Rect,
-    /// Page to switch to on release.
-    pub next_page: Option<u16>,
-    /// Page whose pixels show over the area while it is pressed.
-    pub pressed_page: Option<u16>,
+    /// Name of the page to switch to on release.
+    pub next_page: Option<String>,
+    /// Name of the page whose pixels show over the area while it is
+    /// pressed.
+    pub pressed_page: Option<String>,
     /// Key code: `0x30`-`0x39` digits, `0x2E` decimal point, `0x2D` sign,
     /// `0xF0` cancel, `0xF1` enter, `0xF2` backspace.
     pub code: u16,
@@ -572,10 +618,11 @@ pub struct Key {
 pub struct Input {
     /// Pressing it starts input.
     pub area: Rect,
-    /// Page to switch to on release.
-    pub next_page: Option<u16>,
-    /// Page whose pixels show over the area while it is pressed.
-    pub pressed_page: Option<u16>,
+    /// Name of the page to switch to on release.
+    pub next_page: Option<String>,
+    /// Name of the page whose pixels show over the area while it is
+    /// pressed.
+    pub pressed_page: Option<String>,
     pub vp: u16,
     #[serde(default)]
     pub data_type: InputDataType,
@@ -623,11 +670,11 @@ fn default_input_font_size() -> u8 {
 }
 
 /// A keyboard drawn from another page while input is active.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KeyboardPage {
-    /// The page holding the keyboard image and its `key` controls.
-    pub page: u16,
+    /// Name of the page holding the keyboard image and its `key` controls.
+    pub page: String,
     /// The keyboard on that page.
     pub area: Rect,
     /// Where the keyboard is drawn on the input's page.
@@ -802,49 +849,78 @@ pub struct Progress {
     pub rate_vp: Option<u16>,
 }
 
+/// A touch control's area and pages. `page_id` gives the ID of a page by
+/// name; names it does not know are left out.
+fn touch(
+    area: Rect,
+    next_page: Option<&str>,
+    pressed_page: Option<&str>,
+    page_id: impl Fn(&str) -> Option<u16>,
+    action: TouchAction,
+) -> Touch {
+    Touch {
+        area: area.to_area(),
+        next_page: next_page.and_then(&page_id),
+        pressed_page: pressed_page.and_then(&page_id),
+        action,
+    }
+}
+
 impl Button {
-    pub fn to_touch(&self) -> Touch {
-        Touch {
-            area: self.area.to_area(),
-            next_page: self.next_page,
-            pressed_page: self.pressed_page,
-            action: TouchAction::KeyCode(KeyCode {
+    /// The control as the touch file holds it. `page_id` gives the ID of a
+    /// page by name; names it does not know are left out, and the check
+    /// reports them.
+    pub fn to_touch(&self, page_id: impl Fn(&str) -> Option<u16>) -> Touch {
+        touch(
+            self.area,
+            self.next_page.as_deref(),
+            self.pressed_page.as_deref(),
+            page_id,
+            TouchAction::KeyCode(KeyCode {
                 vp: self.vp,
                 target: self.target,
                 value: self.value,
                 hold_time: self.hold_time,
                 upload: self.upload,
             }),
-        }
+        )
     }
 }
 
 impl Key {
-    pub fn to_touch(&self) -> Touch {
-        Touch {
-            area: self.area.to_area(),
-            next_page: self.next_page,
-            pressed_page: self.pressed_page,
-            action: TouchAction::Basic(self.code),
-        }
+    /// Like [`Button::to_touch`].
+    pub fn to_touch(&self, page_id: impl Fn(&str) -> Option<u16>) -> Touch {
+        touch(
+            self.area,
+            self.next_page.as_deref(),
+            self.pressed_page.as_deref(),
+            page_id,
+            TouchAction::Basic(self.code),
+        )
     }
 }
 
 impl Input {
-    pub fn to_touch(&self) -> Touch {
-        let keyboard = match self.keyboard {
-            None => Keyboard::OnPage,
-            Some(keyboard) => Keyboard::Page {
-                page: keyboard.page,
-                area: keyboard.area.to_area(),
-                position: keyboard.position.into(),
-            },
-        };
-        Touch {
-            area: self.area.to_area(),
-            next_page: self.next_page,
-            pressed_page: self.pressed_page,
-            action: TouchAction::DataInput(DataInput {
+    /// Like [`Button::to_touch`]. A keyboard on a page `page_id` does not
+    /// know becomes the keys of the input's own page.
+    pub fn to_touch(&self, page_id: impl Fn(&str) -> Option<u16>) -> Touch {
+        let keyboard = self
+            .keyboard
+            .as_ref()
+            .and_then(|keyboard| {
+                Some(Keyboard::Page {
+                    page: page_id(&keyboard.page)?,
+                    area: keyboard.area.to_area(),
+                    position: keyboard.position.into(),
+                })
+            })
+            .unwrap_or(Keyboard::OnPage);
+        touch(
+            self.area,
+            self.next_page.as_deref(),
+            self.pressed_page.as_deref(),
+            page_id,
+            TouchAction::DataInput(DataInput {
                 vp: self.vp,
                 data_type: self.data_type,
                 integer_digits: self.integer_digits,
@@ -862,7 +938,7 @@ impl Input {
                 keyboard_transparency: self.keyboard_transparency,
                 upload: self.upload,
             }),
-        }
+        )
     }
 }
 

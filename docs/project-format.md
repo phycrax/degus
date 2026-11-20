@@ -49,20 +49,18 @@ card and power on again.
 ```
 my-hmi/
   project.toml
-  controls/home.toml
+  pages/home.toml
   images/home.png  images/fan-off.png  images/fan-on.png
 ```
 
-`project.toml` lists every file, so file and folder names are up to you.
-Pages list their controls by name.
+`project.toml` sets the screen and the hardware, and includes the
+project's other files. Any file declares pages, controls and libraries;
+this project keeps its page with the page's controls.
 
 ```toml
 # project.toml
 screen = { w = 800, h = 480 }
-controls = ["controls/home.toml"]
-pages = [
-    { id = 0, controls = ["fan", "fan_on", "fan_off", "temperature"] },
-]
+include = ["pages/home.toml"]
 
 [config]
 background_icl = 32
@@ -80,7 +78,12 @@ images = [
 ```
 
 ```toml
-# controls/home.toml
+# pages/home.toml
+
+# Page 0, which the display starts on.
+[page.home]
+id = 0
+controls = ["fan", "fan_on", "fan_off", "temperature"]
 
 # Fan state at 0x1000: 0 off, 1 on.
 [control.fan]
@@ -127,9 +130,57 @@ the firmware, and the display reports each write over the UART.
   each channel are dropped.
 - Paths are relative to the project folder, wherever degus runs.
 - Unknown keys are errors, so a typo never falls back to a default.
-- TOML puts every key after a table header such as `[config]` or `[[icl]]`
-  into that table, so plain keys like `controls`, `pages` and `copy` go
-  first.
+- TOML puts every key after a table header such as `[config]` or
+  `[page.home]` into that table, so plain keys like `include` and `copy` go
+  first in their file.
+
+## Files and declarations
+
+`project.toml` holds the settings of the whole project, below, and
+`include`, the project's other files. Included files include no more, so
+`project.toml` names every file.
+
+Every file, `project.toml` too, declares any of these:
+
+| Declaration | Meaning |
+|-------------|---------|
+| `[page.<name>]` | A page. |
+| `[control.<name>]` | A control. |
+| `[[icl]]` | An image library. |
+| `[[wae]]` | An audio library. |
+| `copy` | Files copied into `DWIN_SET` unchanged, such as fonts. |
+
+Which file a declaration is in means nothing to the build, so organize
+them as you like: a file per page with its controls, as above, or the
+controls on every page in one file and the libraries in another, or
+everything in `project.toml`:
+
+```toml
+# project.toml
+screen = { w = 800, h = 480 }
+include = ["libraries.toml", "common.toml", "pages/home.toml", "pages/settings.toml"]
+
+# common.toml: controls on several pages
+[control.clock]
+...
+
+[control.back]
+...
+
+# pages/settings.toml
+[page.settings]
+id = 1
+controls = ["clock", "setpoint", "back"]
+
+[control.setpoint]
+...
+```
+
+A name is lowercase letters, digits and `_`, starting with a letter, and
+names one page or one control across all the files; a page and a control
+may share a name. Pages list controls by name, controls name pages, and
+check messages name both as their tables: `pages/home.toml:
+[control.fan_on]`.
 
 ## `project.toml`
 
@@ -138,36 +189,8 @@ the firmware, and the display reports each write over the UART.
 | `screen` | required | `{ w, h }`. Controls must fit inside it. |
 | `chip` | `"t5l2"` | `"t5l1"` or `"t5l2"`. Sets the largest image: about 248 KB of JPEG on a T5L1, 760 KB on a T5L2. |
 | `output` | `"target"` | Folder the build writes `DWIN_SET` in. |
-| `controls` | `[]` | The controls files, by path. Each defines controls by name. |
-| `pages` | `[]` | The pages with controls, `{ id, controls }`; `id` is the page ID, below 4092, and `controls` lists the names of its controls in drawing order. A page without controls needs no entry. |
-| `copy` | `[]` | Files copied into `DWIN_SET` unchanged, such as fonts. |
+| `include` | `[]` | The project's other files. |
 | `[config]` | none | The hardware configuration, written as `T5LCFG.CFG`. |
-| `[[icl]]` | none | An image library. |
-| `[[wae]]` | none | An audio library. |
-
-### `[[icl]]`: images
-
-| Key | Default | Meaning |
-|-----|---------|---------|
-| `id` | required | File number; the ICL is written as `<id>.icl`. Icon controls name it in `icon_lib`. |
-| `images` | required | `{ id, path }` each; `id` is the image ID. PNG, BMP, JPEG or GIF. |
-| `quality` | `90` | JPEG quality, 1–100. |
-| `subsampling` | `"4:2:0"` | `"4:4:4"` keeps colour edges sharper, such as on text, and makes larger files. |
-| `passthrough_jpeg` | `false` | Store JPEG sources as they are when the display can decode them. |
-
-Images are stored as JPEG, without transparency: transparent pixels are
-blended onto white.
-
-### `[[wae]]`: audio
-
-| Key | Default | Meaning |
-|-----|---------|---------|
-| `id` | required | File number; the WAE is written as `<id>.wae`. |
-| `clips` | required | `{ id, path }` each; `id` is the clip ID. WAV, MP3, FLAC or Ogg Vorbis. |
-| `format` | `"pcm16"` | `"pcm16"` or `"companded8"`, DWIN's 8-bit "12:8" format at half the size. |
-| `downmix` | `"left"` | How stereo becomes mono: `"left"` keeps the left channel, `"average"` mixes them. |
-
-Clips are converted to 32 kHz mono, the only rate the display plays.
 
 ### `[config]`: hardware configuration
 
@@ -223,33 +246,63 @@ settings stay as they are.
 | `[config.clock_out]` | Clock output on P3.0 at 825.7536 MHz / `div` (required); `enabled` (`true`). |
 | `[config.buzzer]` | `div1` (`0x6E`), `div2` (`0x0BB8`), `duty` (`0x00F0`) and `time` (`10`, in 10 ms units). The defaults are the factory 2.5 kHz beep. |
 
-## Controls files
+## Pages
 
-A controls file defines controls as `[control.<name>]` tables, each picked
-by its `type`. Pages list them by name, and check messages name them so. A
-name is lowercase letters, digits and `_`, starting with a letter, and is
-used once across the project's controls files.
+A `[page.<name>]` table declares a page:
 
-A control on several pages, such as a clock or a keypad, is defined once and
-listed by each page:
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `id` | required | Page ID, below 4092. The page shows image `id` of the background ICL, and the firmware switches to it by this ID. |
+| `controls` | `[]` | Names of its controls, in drawing order: later display controls draw over earlier ones. |
+
+A control on several pages, such as a clock or a keypad, is declared once
+and listed by each page. Controls refer to pages by name, never by ID, so a
+page used only for its image, such as the pressed look of buttons, is
+declared like any other, without controls:
 
 ```toml
-pages = [
-    { id = 0, controls = ["clock", "fan", "fan_on", "fan_off"] },
-    { id = 1, controls = ["clock", "setpoint", "back"] },
-]
+[page.home_pressed]
+id = 2
 ```
 
-The order of a file means nothing: a page's list is its drawing order, and
-later display controls draw over earlier ones.
+## Libraries
+
+### `[[icl]]`: images
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `id` | required | File number; the ICL is written as `<id>.icl`. Icon controls name it in `icon_lib`. |
+| `images` | required | `{ id, path }` each; `id` is the image ID. PNG, BMP, JPEG or GIF. |
+| `quality` | `90` | JPEG quality, 1–100. |
+| `subsampling` | `"4:2:0"` | `"4:4:4"` keeps colour edges sharper, such as on text, and makes larger files. |
+| `passthrough_jpeg` | `false` | Store JPEG sources as they are when the display can decode them. |
+
+Images are stored as JPEG, without transparency: transparent pixels are
+blended onto white.
+
+### `[[wae]]`: audio
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `id` | required | File number; the WAE is written as `<id>.wae`. |
+| `clips` | required | `{ id, path }` each; `id` is the clip ID. WAV, MP3, FLAC or Ogg Vorbis. |
+| `format` | `"pcm16"` | `"pcm16"` or `"companded8"`, DWIN's 8-bit "12:8" format at half the size. |
+| `downmix` | `"left"` | How stereo becomes mono: `"left"` keeps the left channel, `"average"` mixes them. |
+
+Clips are converted to 32 kHz mono, the only rate the display plays.
+
+## Controls
+
+A `[control.<name>]` table declares a control, picked by its `type`. The
+order of the tables means nothing: a page's list is its drawing order.
 
 Touch controls (`button`, `key`, `input`) also take:
 
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `area` | required | `{ x, y, w, h }`: where touches count. |
-| `next_page` | none | Page to switch to on release. |
-| `pressed_page` | none | Page whose background shows inside `area` while it is pressed. Draw the pressed look of a page's buttons on one more background image, and point here. |
+| `next_page` | none | Name of the page to switch to on release. |
+| `pressed_page` | none | Name of the page whose background shows inside `area` while it is pressed. Draw the pressed look of a page's buttons on one more background image, declare a page for it, and name it here. |
 
 Display controls (`icon`, `data`, `text`, `progress`) also take `sp`, a
 description pointer: the display keeps the control's settings at that VP,
@@ -282,7 +335,7 @@ position = { x = 290, y = 108 }
 integer_digits = 3
 decimal_digits = 1
 limits = { min = 0, max = 1000 }
-keyboard = { page = 20, area = { x = 0, y = 0, w = 300, h = 200 }, position = { x = 400, y = 200 } }
+keyboard = { page = "keypad", area = { x = 0, y = 0, w = 300, h = 200 }, position = { x = 400, y = 200 } }
 ```
 
 | Key | Default | Meaning |
@@ -293,7 +346,7 @@ keyboard = { page = 20, area = { x = 0, y = 0, w = 300, h = 200 }, position = { 
 | `integer_digits` | `8` | |
 | `decimal_digits` | `0` | |
 | `limits` | none | `{ min, max }`; numbers outside are rejected. The bounds ignore the decimal point: with 1 decimal digit, `1000` means 100.0. |
-| `keyboard` | none | `{ page, area, position }`: while typing, `area` of page `page` is drawn at `position`, and that page's `key` controls inside `area` work. Without it, the keys are the `key` controls of the page the input is on. |
+| `keyboard` | none | `{ page, area, position }`: while typing, `area` of the page named `page` is drawn at `position`, and that page's `key` controls inside `area` work. Without it, the keys are the `key` controls of the page the input is on. |
 | `color` | `"#000000"` | Colour of the typed number. |
 | `font` | `0` | Font ID. |
 | `font_size` | `16` | Character width in pixels. |
@@ -418,11 +471,11 @@ Errors:
 
 - TOML that does not parse, unknown keys, missing required keys, and files
   that are not there;
-- IDs listed twice: images in an ICL, clips in a WAE, pages in `pages`,
-  and file numbers (13 and 14 are taken);
-- controls files listed twice, a control name defined in two files, names
-  that are not lowercase letters, digits and `_`, and names a page lists
-  that no controls file defines;
+- IDs used twice: images in an ICL, clips in a WAE, page IDs, and file
+  numbers (13 and 14 are taken);
+- files included twice, names declared twice, names that are not lowercase
+  letters, digits and `_`, and names of pages or controls that nothing
+  declares;
 - a `background_icl` that is not a declared `[[icl]]`;
 - `[config]` values out of range, and a `baud` the UART cannot reach;
 - copied files named like a generated file, or a second `T5LCFG*.CFG`;
@@ -441,7 +494,7 @@ Warnings:
 
 - pages without a background image, when `background_icl` is set;
 - controls no page lists, and a control a page lists twice;
-- `next_page` and `pressed_page` that point nowhere;
+- `pressed_page` pages without a background image;
 - inputs whose keyboard page has no `key` controls;
 - `icon` value and image ranges of different lengths;
 - a `music_wae` that is not a declared `[[wae]]`, and `load_22` without the
@@ -515,9 +568,9 @@ With `--protocol lines`, the host sends script lines instead,
 answers `ack`, `data 0x1000 0x0001` or `error ...`, and sends
 `upload 0x1000 0x0001`.
 
-The window shows the screen, which takes clicks as touches, the pages, a
-command box for script lines, VP watches, the VP memory and a log. Its
-"outlines" box draws each control's box and names it and its controls file.
+The window shows the screen, which takes clicks as touches, the pages by ID
+and name, a command box for script lines, VP watches, the VP memory and a
+log. Its "outlines" box draws each control's box and names it and its file.
 
 The simulator is a preview, not the panel:
 

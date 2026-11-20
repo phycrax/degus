@@ -102,9 +102,7 @@ pub struct ProjectAudio {
 impl ProjectAudio {
     pub fn new(project: &Project) -> Self {
         let waes = project
-            .config
-            .wae
-            .iter()
+            .waes()
             .map(|spec| {
                 let options = WaeOptions {
                     format: spec.format.into(),

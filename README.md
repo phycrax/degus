@@ -22,8 +22,12 @@ display downloads. The agent writes the panel next to the firmware,
 shows up in a diff.
 
 ```toml
-# A button that writes 1 to VP 0x1000, and an icon that shows its value.
-# Pages list them by name: pages = [{ id = 0, controls = ["fan", "fan_on"] }]
+# A page with a button that writes 1 to VP 0x1000, and an icon that shows
+# its value.
+[page.home]
+id = 0
+controls = ["fan", "fan_on"]
+
 [control.fan_on]
 type = "button"
 area = { x = 300, y = 200, w = 120, h = 60 }

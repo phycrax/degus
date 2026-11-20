@@ -36,11 +36,11 @@ pub struct Screen {
     pub h: u16,
 }
 
-/// A page the project has: one with controls or a background image.
+/// A page the project has: a declared one or a background image.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageInfo {
     pub id: u16,
-    /// Its controls files, or a note that it has none.
+    /// Its name, or a note that it is only a background image.
     pub label: String,
 }
 
@@ -70,7 +70,7 @@ pub struct World {
     pub controls: Controls,
     /// Where each control comes from; empty when not loaded from a project.
     pub sources: SourceMap,
-    /// The controls file of each [`SourceRef::entry`].
+    /// The project's files, by [`SourceRef::file`].
     pub files: Vec<PathBuf>,
     pub pages: Vec<PageInfo>,
     pub icons: Box<dyn IconSource>,
@@ -105,51 +105,41 @@ impl World {
             return Err(LoadError::Check(diagnostics));
         }
         // The check has accepted `[config]`, so this cannot fail.
-        let config = match &project.config.config {
+        let config = match &project.settings.config {
             Some(spec) => spec.to_config().unwrap_or_default(),
             None => Config::default(),
         };
         let (controls, sources) = project.to_controls_with_sources();
         let icons = ProjectIcons::new(project);
 
-        // A page's label is the files its controls come from.
-        let mut labels: BTreeMap<u16, Vec<String>> = BTreeMap::new();
-        for page in &project.config.pages {
-            let files = labels.entry(page.id).or_default();
-            for name in &page.controls {
-                let Some((entry, _)) = project.control(name) else {
-                    continue;
-                };
-                let file = project.controls[entry].path.display().to_string();
-                if !files.contains(&file) {
-                    files.push(file);
-                }
-            }
+        let mut labels: BTreeMap<u16, Vec<&str>> = BTreeMap::new();
+        for (_, name, page) in project.pages() {
+            labels.entry(page.id).or_default().push(name);
         }
         for id in icons.ids(config.background_icl.into()) {
             labels.entry(id).or_default();
         }
         let pages = labels
             .into_iter()
-            .map(|(id, files)| PageInfo {
+            .map(|(id, names)| PageInfo {
                 id,
-                label: if files.is_empty() {
+                label: if names.is_empty() {
                     "background only".to_owned()
                 } else {
-                    files.join(", ")
+                    names.join(", ")
                 },
             })
             .collect();
 
         Ok(Self {
             screen: Screen {
-                w: project.config.screen.w,
-                h: project.config.screen.h,
+                w: project.settings.screen.w,
+                h: project.settings.screen.h,
             },
             config,
             controls,
             sources,
-            files: project.controls.iter().map(|e| e.path.clone()).collect(),
+            files: project.files.iter().map(|file| file.path.clone()).collect(),
             pages,
             icons: Box::new(icons),
             audio: Box::new(ProjectAudio::new(project)),
@@ -158,14 +148,14 @@ impl World {
         })
     }
 
-    /// Where a control comes from, such as `controls/home.toml: fan_on`, as
-    /// the check's messages name it.
+    /// Where a control comes from, such as `controls/home.toml:
+    /// [control.fan_on]`, as the check's messages name it.
     pub fn describe(&self, source: &SourceRef) -> String {
         let file = self
             .files
-            .get(source.entry)
+            .get(source.file)
             .map_or_else(|| "?".to_owned(), |path| path.display().to_string());
-        format!("{file}: {}", source.name)
+        format!("{file}: [control.{}]", source.name)
     }
 }
 
@@ -184,9 +174,7 @@ pub struct ProjectIcons {
 impl ProjectIcons {
     pub fn new(project: &Project) -> Self {
         let libs = project
-            .config
-            .icl
-            .iter()
+            .icls()
             .map(|spec| {
                 let images = spec
                     .images

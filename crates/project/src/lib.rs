@@ -1,8 +1,8 @@
 //! Builds a DWIN T5L `DWIN_SET` folder from a project described in TOML. A
-//! project is a folder: its `project.toml` lists the screen, the hardware
-//! configuration, the icon (ICL) and audio (WAE) libraries, the files to
-//! copy, the controls files and the pages, which list controls by name, with
-//! paths relative to the folder.
+//! project is a folder: its `project.toml` sets the screen, the hardware
+//! configuration and the other files to include. Any of the files declares
+//! pages, the controls they list by name, the icon (ICL) and audio (WAE)
+//! libraries and the files to copy, with paths relative to the folder.
 //!
 //! The build writes a `DWIN_SET` folder in the output folder, `target`
 //! unless set, replacing the one there. It holds `<id>.icl` and `<id>.wae`
@@ -38,4 +38,4 @@ pub use check::{Diagnostic, Severity};
 pub use create::new;
 pub use error::{Error, Result};
 pub use model::PROJECT_FILE_NAME;
-pub use project::{ControlsEntry, PageSources, Project, SourceMap, SourceRef};
+pub use project::{PageSources, Project, ProjectFile, SourceMap, SourceRef};

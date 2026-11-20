@@ -75,7 +75,7 @@ impl Project {
         if let Some(bytes) = analysis.config {
             files.push((degus_config::FILE_NAME.to_owned(), bytes));
         }
-        for path in &self.config.copy {
+        for path in self.copies() {
             let source = self.resolve(path);
             let bytes = std::fs::read(&source).map_err(io_error(&source))?;
             let name = path

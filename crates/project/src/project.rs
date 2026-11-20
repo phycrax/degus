@@ -5,51 +5,58 @@ use degus_controls::Controls;
 use serde::de::DeserializeOwned;
 
 use crate::error::{Error, Result, io_error};
-use crate::model::{Control, ControlsFile, PROJECT_FILE_NAME, ProjectFile};
+use crate::model::{
+    Control, Declarations, IclSpec, PROJECT_FILE_NAME, PageSpec, RootFile, Settings, WaeSpec,
+};
 
-/// A loaded project: the project file and the controls files it lists.
+/// A loaded project: the settings of `project.toml`, and the declarations of
+/// it and the files it includes.
 #[derive(Debug, Clone)]
 pub struct Project {
     file: PathBuf,
     root: PathBuf,
-    pub config: ProjectFile,
-    /// The controls files, in the order the project file lists them.
-    pub controls: Vec<ControlsEntry>,
+    pub settings: Settings,
+    /// `project.toml`, then each file it includes, in the order `include`
+    /// lists them. A file listed twice is here once; the check reports it.
+    pub files: Vec<ProjectFile>,
 }
 
-/// A controls file of the project.
+/// A file of the project and what it declares.
 #[derive(Debug, Clone)]
-pub struct ControlsEntry {
+pub struct ProjectFile {
     /// Path relative to the project root.
     pub path: PathBuf,
-    pub file: ControlsFile,
+    pub declarations: Declarations,
 }
 
 impl Project {
     /// Loads the project in the folder `dir`: its `project.toml` and every
-    /// controls file it lists. Paths in the project are relative to `dir`.
+    /// file it includes. Paths in the project are relative to `dir`.
     pub fn load(dir: impl AsRef<Path>) -> Result<Self> {
         let root = dir.as_ref().to_path_buf();
         if root.is_file() {
             return Err(Error::NotAFolder(root));
         }
         let file = root.join(PROJECT_FILE_NAME);
-        let config: ProjectFile = read_toml(&file)?;
-        let controls = config
-            .controls
-            .iter()
-            .map(|path| {
-                Ok(ControlsEntry {
-                    path: path.clone(),
-                    file: read_toml(&root.join(path))?,
-                })
-            })
-            .collect::<Result<_>>()?;
+        let (settings, declarations) = read_toml::<RootFile>(&file)?.split();
+        let mut files = vec![ProjectFile {
+            path: PROJECT_FILE_NAME.into(),
+            declarations,
+        }];
+        for path in &settings.include {
+            if files.iter().any(|file| file.path == *path) {
+                continue;
+            }
+            files.push(ProjectFile {
+                path: path.clone(),
+                declarations: read_toml(&root.join(path))?,
+            });
+        }
         Ok(Self {
             file,
             root,
-            config,
-            controls,
+            settings,
+            files,
         })
     }
 
@@ -71,21 +78,68 @@ impl Project {
     /// The folder [`Project::build`](crate::Project::build) writes `DWIN_SET`
     /// in.
     pub fn output_dir(&self) -> PathBuf {
-        self.resolve(&self.config.output)
+        self.resolve(&self.settings.output)
+    }
+
+    /// The ICLs of every file.
+    pub fn icls(&self) -> impl Iterator<Item = &IclSpec> {
+        self.files.iter().flat_map(|file| &file.declarations.icl)
+    }
+
+    /// The WAEs of every file.
+    pub fn waes(&self) -> impl Iterator<Item = &WaeSpec> {
+        self.files.iter().flat_map(|file| &file.declarations.wae)
+    }
+
+    /// The files every file copies into the output.
+    pub fn copies(&self) -> impl Iterator<Item = &PathBuf> {
+        self.files.iter().flat_map(|file| &file.declarations.copy)
+    }
+
+    /// The pages, each with its name and the index of its file in
+    /// [`Project::files`]. A name declared in several files is the first
+    /// one's; the check reports the others.
+    pub fn pages(&self) -> impl Iterator<Item = (usize, &str, &PageSpec)> {
+        self.files
+            .iter()
+            .enumerate()
+            .flat_map(|(index, file)| {
+                file.declarations
+                    .page
+                    .iter()
+                    .map(move |(name, page)| (index, name.as_str(), page))
+            })
+            .filter(|&(index, name, _)| self.page(name).is_some_and(|(first, _)| first == index))
+    }
+
+    /// The page named `name`, with the index of its file in
+    /// [`Project::files`].
+    pub fn page(&self, name: &str) -> Option<(usize, &PageSpec)> {
+        self.files
+            .iter()
+            .enumerate()
+            .find_map(|(index, file)| file.declarations.page.get(name).map(|page| (index, page)))
+    }
+
+    /// The ID of the page named `name`.
+    pub fn page_id(&self, name: &str) -> Option<u16> {
+        self.page(name).map(|(_, page)| page.id)
     }
 
     /// The control named `name`, with the index of its file in
-    /// [`Project::controls`]. A name defined in several files is the first
+    /// [`Project::files`]. A name declared in several files is the first
     /// one's; the check reports the others.
     pub fn control(&self, name: &str) -> Option<(usize, &Control)> {
-        self.controls
-            .iter()
-            .enumerate()
-            .find_map(|(entry, file)| file.file.controls.get(name).map(|c| (entry, c)))
+        self.files.iter().enumerate().find_map(|(index, file)| {
+            file.declarations
+                .control
+                .get(name)
+                .map(|control| (index, control))
+        })
     }
 
     /// The controls of every page, ready for `degus-controls` to build.
-    /// Pages listed twice are merged, and names no file defines are left
+    /// Pages sharing an ID are merged, and names nothing declares are left
     /// out; the check reports both.
     pub fn to_controls(&self) -> Controls {
         self.to_controls_with_sources().0
@@ -93,17 +147,18 @@ impl Project {
 
     /// Like [`Project::to_controls`], with where each control comes from.
     pub fn to_controls_with_sources(&self) -> (Controls, SourceMap) {
+        let page_id = |name: &str| self.page_id(name);
         let mut controls = Controls::new();
         let mut sources = SourceMap::default();
-        for page in &self.config.pages {
+        for (_, _, page) in self.pages() {
             let target = controls.page_mut(page.id);
             let page_sources = sources.pages.entry(page.id).or_default();
             for name in &page.controls {
-                let Some((entry, control)) = self.control(name) else {
+                let Some((file, control)) = self.control(name) else {
                     continue;
                 };
                 let source = SourceRef {
-                    entry,
+                    file,
                     name: name.clone(),
                 };
                 if control.is_touch() {
@@ -112,9 +167,9 @@ impl Project {
                     page_sources.display.push(source);
                 }
                 match control {
-                    Control::Button(button) => target.touch.push(button.to_touch()),
-                    Control::Key(key) => target.touch.push(key.to_touch()),
-                    Control::Input(input) => target.touch.push(input.to_touch()),
+                    Control::Button(button) => target.touch.push(button.to_touch(page_id)),
+                    Control::Key(key) => target.touch.push(key.to_touch(page_id)),
+                    Control::Input(input) => target.touch.push(input.to_touch(page_id)),
                     Control::Icon(icon) => target.display.push(icon.to_display()),
                     Control::Data(data) => target.display.push(data.to_display()),
                     Control::Text(text) => target.display.push(text.to_display()),
@@ -149,11 +204,11 @@ pub struct PageSources {
     pub display: Vec<SourceRef>,
 }
 
-/// A control in a controls file.
+/// A control as a file declares it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceRef {
-    /// Index into [`Project::controls`] of the file defining it.
-    pub entry: usize,
+    /// Index into [`Project::files`] of the file declaring it.
+    pub file: usize,
     /// The control's name.
     pub name: String,
 }

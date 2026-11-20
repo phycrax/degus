@@ -15,11 +15,7 @@ const YELLOW: Rgb<u8> = Rgb([255, 255, 0]);
 
 const PROJECT: &str = r#"
 screen = { w = 200, h = 120 }
-controls = ["controls/home.toml", "controls/keyboard.toml"]
-pages = [
-    { id = 0, controls = ["lamp", "on", "off", "next", "reading", "level", "message", "setpoint"] },
-    { id = 3, controls = ["key_1", "key_2", "key_point", "key_enter", "key_cancel", "key_5"] },
-]
+include = ["controls/home.toml", "controls/keyboard.toml"]
 
 [config]
 background_icl = 32
@@ -31,6 +27,7 @@ images = [
     { id = 1, path = "pages/next.png" },
     { id = 2, path = "pages/pressed.png" },
     { id = 3, path = "pages/keyboard.png" },
+    { id = 4, path = "pages/next.png" },
 ]
 
 [[icl]]
@@ -39,9 +36,20 @@ images = [
     { id = 0, path = "icons/off.png" },
     { id = 1, path = "icons/on.png" },
 ]
+
+# Pages with only their background: where "next" goes, and the pressed look.
+[page.second]
+id = 1
+
+[page.pressed]
+id = 2
 "#;
 
 const HOME: &str = r##"
+[page.home]
+id = 0
+controls = ["lamp", "on", "off", "next", "reading", "level", "message", "setpoint"]
+
 [control.lamp]
 type = "icon"
 vp = 0x1000
@@ -56,7 +64,7 @@ type = "button"
 area = { x = 100, y = 10, w = 40, h = 30 }
 vp = 0x1000
 value = 1
-pressed_page = 2
+pressed_page = "pressed"
 
 [control.off]
 type = "button"
@@ -71,7 +79,7 @@ area = { x = 100, y = 50, w = 40, h = 20 }
 vp = 0x1002
 value = 5
 hold_time = 5
-next_page = 1
+next_page = "second"
 
 [control.reading]
 type = "data"
@@ -107,12 +115,16 @@ position = { x = 190, y = 50 }
 integer_digits = 3
 decimal_digits = 1
 limits = { min = 0, max = 1000 }
-keyboard = { page = 3, area = { x = 0, y = 0, w = 100, h = 40 }, position = { x = 0, y = 80 } }
+keyboard = { page = "keyboard", area = { x = 0, y = 0, w = 100, h = 40 }, position = { x = 0, y = 80 } }
 "##;
 
 /// Keys at 25 × 20: `1 2 . enter` on the first row, `cancel 5` on the
 /// second.
 const KEYBOARD: &str = r#"
+[page.keyboard]
+id = 3
+controls = ["key_1", "key_2", "key_point", "key_enter", "key_cancel", "key_5"]
+
 [control.key_1]
 type = "key"
 area = { x = 0, y = 0, w = 25, h = 20 }
@@ -205,10 +217,11 @@ fn loads_the_pages_and_draws_the_start_page() {
     assert_eq!(
         pages,
         [
-            (0, "controls/home.toml"),
-            (1, "background only"),
-            (2, "background only"),
-            (3, "controls/keyboard.toml"),
+            (0, "home"),
+            (1, "second"),
+            (2, "pressed"),
+            (3, "keyboard"),
+            (4, "background only"),
         ]
     );
     assert_eq!(sim.page(), 0);
@@ -234,9 +247,9 @@ fn refuses_a_project_the_build_would_refuse() {
         panic!("the check should refuse the project");
     };
     assert!(
-        diagnostics
-            .iter()
-            .any(|d| d.to_string().contains("controls/home.toml: on: area")),
+        diagnostics.iter().any(|d| d
+            .to_string()
+            .contains("controls/home.toml: [control.on]: area")),
         "{diagnostics:#?}"
     );
 }
@@ -414,8 +427,8 @@ fn labels_the_overlay_with_the_controls_source() {
     let sim = Sim::load(project("overlay")).unwrap();
     let overlay = sim.overlay();
     let labels: Vec<_> = overlay.iter().map(|item| item.label.as_str()).collect();
-    assert!(labels.contains(&"controls/home.toml: lamp"));
-    assert!(labels.contains(&"controls/home.toml: setpoint"));
+    assert!(labels.contains(&"controls/home.toml: [control.lamp]"));
+    assert!(labels.contains(&"controls/home.toml: [control.setpoint]"));
     let lamp = overlay.iter().find(|i| i.label.contains("lamp")).unwrap();
     assert_eq!((lamp.rect.w, lamp.rect.h), (20, 20));
     assert!(!lamp.touch);

@@ -50,8 +50,11 @@ fn project(name: &str, config: &str) -> PathBuf {
         format!(
             r#"
 screen = {{ w = 100, h = 100 }}
-controls = ["home.toml"]
-pages = [{{ id = 0, controls = ["button"] }}]
+include = ["home.toml"]
+
+[page.home]
+id = 0
+controls = ["button"]
 
 [config]
 background_icl = 32

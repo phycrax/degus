@@ -37,7 +37,8 @@ pub enum Severity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub severity: Severity,
-    /// Where: a file, and for controls the control's name.
+    /// Where: a file, and the declaration in it, such as
+    /// `controls/home.toml: [control.fan_on]`.
     pub location: String,
     pub message: String,
 }
@@ -88,8 +89,6 @@ impl Analysis {
 
 /// What controls are checked against.
 struct Context<'a> {
-    /// Name of the project file.
-    project_file: &'a str,
     screen: Size,
     /// Icon IDs of each ICL, by ICL ID; libraries that failed to prepare
     /// are missing.
@@ -98,9 +97,10 @@ struct Context<'a> {
     icl_ids: BTreeSet<u16>,
     /// Image IDs of the background ICL, if it is declared and prepared.
     backgrounds: Option<(u16, &'a BTreeSet<u16>)>,
-    pages: BTreeSet<u16>,
-    /// Pages with keyboard keys.
-    key_pages: BTreeSet<u16>,
+    /// Page IDs by name.
+    pages: BTreeMap<&'a str, u16>,
+    /// Names of the pages with keyboard keys.
+    key_pages: BTreeSet<&'a str>,
 }
 
 impl Project {
@@ -111,11 +111,11 @@ impl Project {
 
     pub(crate) fn analyze(&self) -> Analysis {
         let mut a = Analysis::default();
-        let config = &self.config;
-        let file = PROJECT_FILE_NAME.to_owned();
-        if config.screen.w == 0 || config.screen.h == 0 {
-            a.error(&file, "screen size must not be zero");
+        let settings = &self.settings;
+        if settings.screen.w == 0 || settings.screen.h == 0 {
+            a.error(PROJECT_FILE_NAME, "screen size must not be zero");
         }
+        self.check_include(&mut a);
 
         // File numbers in use, so two libraries cannot share one.
         let mut numbers = BTreeMap::from([
@@ -130,79 +130,89 @@ impl Project {
 
         let mut icons = BTreeMap::new();
         let mut icl_ids = BTreeSet::new();
-        for spec in &config.icl {
-            let location = format!("{file}: [[icl]] id = {}", spec.id);
-            claim(&mut a, spec.id, &location, format!("{}.icl", spec.id));
-            icl_ids.insert(spec.id);
-            match prepare_icl(self.root(), spec, config.chip.into()) {
-                Ok(builder) => {
-                    icons.insert(spec.id, builder.ids().collect());
-                    a.icls.push((spec.id, builder));
+        let mut wae_ids = BTreeSet::new();
+        for file in &self.files {
+            let path = file.path.display();
+            for spec in &file.declarations.icl {
+                let location = format!("{path}: [[icl]] id = {}", spec.id);
+                claim(&mut a, spec.id, &location, format!("{}.icl", spec.id));
+                icl_ids.insert(spec.id);
+                match prepare_icl(self.root(), spec, settings.chip.into()) {
+                    Ok(builder) => {
+                        icons.insert(spec.id, builder.ids().collect());
+                        a.icls.push((spec.id, builder));
+                    }
+                    Err(message) => a.error(&location, message),
                 }
-                Err(message) => a.error(&location, message),
+            }
+            for spec in &file.declarations.wae {
+                let location = format!("{path}: [[wae]] id = {}", spec.id);
+                claim(&mut a, spec.id, &location, format!("{}.wae", spec.id));
+                wae_ids.insert(spec.id);
+                match prepare_wae(self.root(), spec) {
+                    Ok(builder) => a.waes.push((spec.id, builder)),
+                    Err(message) => a.error(&location, message),
+                }
             }
         }
-        let background_icl = config.config.as_ref().and_then(|spec| spec.background_icl);
+        let background_icl = settings
+            .config
+            .as_ref()
+            .and_then(|spec| spec.background_icl);
         if let Some(id) = background_icl
             && !icl_ids.contains(&id)
         {
             a.error(
-                format!("{file}: [config] background_icl"),
-                format!("{id} is not an ICL declared in {file}"),
+                format!("{PROJECT_FILE_NAME}: [config] background_icl"),
+                format!("{id} is not a declared [[icl]]"),
             );
-        }
-        let mut wae_ids = BTreeSet::new();
-        for spec in &config.wae {
-            let location = format!("{file}: [[wae]] id = {}", spec.id);
-            claim(&mut a, spec.id, &location, format!("{}.wae", spec.id));
-            wae_ids.insert(spec.id);
-            match prepare_wae(self.root(), spec) {
-                Ok(builder) => a.waes.push((spec.id, builder)),
-                Err(message) => a.error(&location, message),
-            }
         }
 
         let generated: BTreeSet<_> = numbers.values().cloned().collect();
-        for path in &config.copy {
-            let location = format!("{file}: copy");
-            match path.file_name().map(|name| name.to_string_lossy()) {
-                _ if !self.resolve(path).is_file() => {
-                    a.error(location, format!("{} not found", path.display()));
+        for file in &self.files {
+            let location = format!("{}: copy", file.path.display());
+            for path in &file.declarations.copy {
+                match path.file_name().map(|name| name.to_string_lossy()) {
+                    _ if !self.resolve(path).is_file() => {
+                        a.error(&location, format!("{} not found", path.display()));
+                    }
+                    Some(name) if generated.contains(name.as_ref()) => {
+                        a.error(&location, format!("{name} is also generated by the build"));
+                    }
+                    Some(name) if settings.config.is_some() && is_config_file(&name) => {
+                        a.error(
+                            &location,
+                            format!(
+                                "{name} would sit beside the {CONFIG_FILE_NAME} built from \
+                                 [config]"
+                            ),
+                        );
+                    }
+                    _ => {}
                 }
-                Some(name) if generated.contains(name.as_ref()) => {
-                    a.error(location, format!("{name} is also generated by the build"));
-                }
-                Some(name) if config.config.is_some() && is_config_file(&name) => {
-                    a.error(
-                        location,
-                        format!(
-                            "{name} would sit beside the {CONFIG_FILE_NAME} built from [config]"
-                        ),
-                    );
-                }
-                _ => {}
             }
         }
-        if let Some(spec) = &config.config {
+        if let Some(spec) = &settings.config {
             self.check_config(&mut a, spec, &wae_ids);
         }
 
         let backgrounds = background_icl.and_then(|id| icons.get(&id).map(|ids| (id, ids)));
         let context = Context {
-            project_file: &file,
-            screen: config.screen,
+            screen: settings.screen,
             icl_ids,
             backgrounds,
-            pages: config.pages.iter().map(|page| page.id).collect(),
-            key_pages: config
-                .pages
-                .iter()
-                .filter(|page| {
+            pages: self
+                .pages()
+                .map(|(_, name, page)| (name, page.id))
+                .collect(),
+            key_pages: self
+                .pages()
+                .filter(|(_, _, page)| {
                     page.controls
                         .iter()
                         .any(|name| matches!(self.control(name), Some((_, Control::Key(_)))))
                 })
-                .map(|page| page.id)
+                .map(|(_, name, _)| name)
                 .collect(),
             icons: &icons,
         };
@@ -211,9 +221,21 @@ impl Project {
         a
     }
 
+    fn check_include(&self, a: &mut Analysis) {
+        let location = format!("{PROJECT_FILE_NAME}: include");
+        let mut seen = BTreeSet::from([Path::new(PROJECT_FILE_NAME)]);
+        for path in &self.settings.include {
+            if !seen.insert(path) {
+                a.error(
+                    &location,
+                    format!("{} is already part of the project", path.display()),
+                );
+            }
+        }
+    }
+
     fn check_config(&self, a: &mut Analysis, spec: &ConfigSpec, wae_ids: &BTreeSet<u16>) {
-        let file = PROJECT_FILE_NAME.to_owned();
-        let location = format!("{file}: [config]");
+        let location = format!("{PROJECT_FILE_NAME}: [config]");
         let config = match spec.to_config() {
             Ok(config) => config,
             Err(message) => return a.error(&location, message),
@@ -229,14 +251,14 @@ impl Project {
             a.warning(
                 &location,
                 format!(
-                    "music_wae {music} is not a WAE declared in {file}; \
+                    "music_wae {music} is not a declared [[wae]]; \
                      the display plays the file {music} it holds"
                 ),
             );
         }
         if config.load_22 {
             let init = config.init_file.map_or(INIT_FILE, u16::from);
-            let built = self.config.copy.iter().any(|path| {
+            let built = self.copies().any(|path| {
                 let name = path.file_name().unwrap_or_default().to_string_lossy();
                 id_from_file_name(&name) == Some(init)
             });
@@ -256,7 +278,7 @@ impl Project {
             } else {
                 (lcd.h_d, lcd.v_d)
             };
-            let screen = self.config.screen;
+            let screen = self.settings.screen;
             if (w, h) != (screen.w, screen.h) {
                 a.warning(
                     &location,
@@ -282,46 +304,18 @@ impl Project {
         }
     }
 
-    /// Checks each control once, however many pages list it, and the names
-    /// across the files.
+    /// Checks each control once, however many pages list it.
     fn check_controls(&self, a: &mut Analysis, context: &Context) {
-        let location = format!("{}: controls", context.project_file);
         let listed: BTreeSet<&str> = self
-            .config
-            .pages
-            .iter()
-            .flat_map(|page| page.controls.iter().map(String::as_str))
+            .pages()
+            .flat_map(|(_, _, page)| page.controls.iter().map(String::as_str))
             .collect();
-        let mut paths = BTreeSet::new();
-        let mut defined: BTreeMap<&str, &Path> = BTreeMap::new();
-        for entry in &self.controls {
-            if !paths.insert(&entry.path) {
-                a.error(
-                    &location,
-                    format!("{} is listed twice", entry.path.display()),
-                );
-                continue;
-            }
-            let file = entry.path.display().to_string();
-            for (name, control) in &entry.file.controls {
-                let location = format!("{file}: {name}");
-                if !is_name(name) {
-                    a.error(
-                        &location,
-                        format!(
-                            "{name:?} is not a name: use lowercase letters, digits and _, \
-                             starting with a letter"
-                        ),
-                    );
-                }
-                match defined.entry(name) {
-                    Entry::Occupied(first) => a.error(
-                        &location,
-                        format!("{name} is also defined in {}", first.get().display()),
-                    ),
-                    Entry::Vacant(slot) => {
-                        slot.insert(&entry.path);
-                    }
+        let mut declared = BTreeMap::new();
+        for file in &self.files {
+            for (name, control) in &file.declarations.control {
+                let location = format!("{}: [control.{name}]", file.path.display());
+                if !declare(a, &location, &mut declared, name, &file.path) {
+                    continue;
                 }
                 if !listed.contains(name.as_str()) {
                     a.warning(&location, "no page lists it");
@@ -339,64 +333,101 @@ impl Project {
         }
     }
 
-    /// Checks each page and what depends on the page its controls are on.
+    /// Checks each page, and what depends on the page its controls are on.
     fn check_pages(&self, a: &mut Analysis, context: &Context) {
-        let location = format!("{}: pages", context.project_file);
-        let mut seen = BTreeSet::new();
-        for page in &self.config.pages {
-            let id = page.id;
-            if id >= MAX_PAGES {
-                a.error(&location, format!("page ID {id} is not below {MAX_PAGES}"));
-            }
-            if !seen.insert(id) {
-                a.error(&location, format!("page {id} is listed twice"));
-            }
-            if let Some((icl, ids)) = context.backgrounds
-                && !ids.contains(&id)
-            {
-                a.warning(
-                    &location,
-                    format!("page {id} has no background image in {icl}.icl"),
-                );
-            }
-
-            let mut names = BTreeSet::new();
-            let mut displays = 0;
-            for name in &page.controls {
-                if !names.insert(name) {
-                    a.warning(&location, format!("page {id} lists {name} twice"));
+        let mut declared = BTreeMap::new();
+        let mut ids = BTreeMap::new();
+        for file in &self.files {
+            for (page_name, page) in &file.declarations.page {
+                let location = format!("{}: [page.{page_name}]", file.path.display());
+                if !declare(a, &location, &mut declared, page_name, &file.path) {
+                    continue;
                 }
-                let Some((entry, control)) = self.control(name) else {
+                let id = page.id;
+                if id >= MAX_PAGES {
+                    a.error(&location, format!("ID {id} is not below {MAX_PAGES}"));
+                }
+                if let Some(other) = ids.insert(id, page_name) {
+                    a.error(&location, format!("ID {id} is also page {other}"));
+                }
+                if let Some((icl, images)) = context.backgrounds
+                    && !images.contains(&id)
+                {
+                    a.warning(&location, format!("has no background image in {icl}.icl"));
+                }
+
+                let mut names = BTreeSet::new();
+                let mut displays = 0;
+                for name in &page.controls {
+                    if !names.insert(name) {
+                        a.warning(&location, format!("lists {name} twice"));
+                    }
+                    let Some((index, control)) = self.control(name) else {
+                        a.error(&location, format!("lists {name}, which no file declares"));
+                        continue;
+                    };
+                    if !control.is_touch() {
+                        displays += 1;
+                    }
+                    // Without a keyboard page, the keys are on the input's
+                    // own page.
+                    if let Control::Input(input) = control
+                        && input.keyboard.is_none()
+                        && !context.key_pages.contains(page_name.as_str())
+                    {
+                        a.warning(
+                            format!(
+                                "{}: [control.{name}] (page {page_name})",
+                                self.files[index].path.display()
+                            ),
+                            format!("keyboard page {page_name} has no key controls"),
+                        );
+                    }
+                }
+                if displays > MAX_DISPLAYS_PER_PAGE {
                     a.error(
                         &location,
-                        format!("page {id} lists {name}, which no controls file defines"),
-                    );
-                    continue;
-                };
-                if !control.is_touch() {
-                    displays += 1;
-                }
-                // Without a keyboard page, the keys are on the input's page.
-                if let Control::Input(input) = control
-                    && input.keyboard.is_none()
-                    && !context.key_pages.contains(&id)
-                {
-                    let file = self.controls[entry].path.display();
-                    a.warning(
-                        format!("{file}: {name} (page {id})"),
-                        format!("keyboard page {id} has no key controls"),
+                        format!(
+                            "{displays} display controls; a page holds at most \
+                             {MAX_DISPLAYS_PER_PAGE}"
+                        ),
                     );
                 }
             }
-            if displays > MAX_DISPLAYS_PER_PAGE {
-                a.error(
-                    &location,
-                    format!(
-                        "page {id} has {displays} display controls; a page holds at most \
-                         {MAX_DISPLAYS_PER_PAGE}"
-                    ),
-                );
-            }
+        }
+    }
+}
+
+/// Records that `file` declares `name`, reporting a name that is not one
+/// and one an earlier file declares. Returns whether this is the
+/// declaration in use.
+fn declare<'a>(
+    a: &mut Analysis,
+    location: &str,
+    declared: &mut BTreeMap<&'a str, &'a Path>,
+    name: &'a str,
+    file: &'a Path,
+) -> bool {
+    if !is_name(name) {
+        a.error(
+            location,
+            format!(
+                "{name:?} is not a name: use lowercase letters, digits and _, starting with a \
+                 letter"
+            ),
+        );
+    }
+    match declared.entry(name) {
+        Entry::Occupied(first) => {
+            a.error(
+                location,
+                format!("{name} is also declared in {}", first.get().display()),
+            );
+            false
+        }
+        Entry::Vacant(slot) => {
+            slot.insert(file);
+            true
         }
     }
 }
@@ -422,7 +453,13 @@ fn check_button(a: &mut Analysis, location: &str, button: &Button, context: &Con
     {
         a.error(location, format!("target bit {bit} is not in 0-15"));
     }
-    check_touch_pages(a, location, button.next_page, button.pressed_page, context);
+    check_touch_pages(
+        a,
+        location,
+        button.next_page.as_deref(),
+        button.pressed_page.as_deref(),
+        context,
+    );
 }
 
 fn check_key(a: &mut Analysis, location: &str, key: &Key, context: &Context) {
@@ -433,7 +470,13 @@ fn check_key(a: &mut Analysis, location: &str, key: &Key, context: &Context) {
             format!("code 0x{:04X} must not start with FE or FD", key.code),
         );
     }
-    check_touch_pages(a, location, key.next_page, key.pressed_page, context);
+    check_touch_pages(
+        a,
+        location,
+        key.next_page.as_deref(),
+        key.pressed_page.as_deref(),
+        context,
+    );
 }
 
 /// The keys of an input without a keyboard page are checked with its pages.
@@ -449,7 +492,7 @@ fn check_input(a: &mut Analysis, location: &str, input: &Input, context: &Contex
             format!("limits min {} is above max {}", limits.min, limits.max),
         );
     }
-    if let Some(keyboard) = input.keyboard {
+    if let Some(keyboard) = &input.keyboard {
         check_rect(a, location, "keyboard area", keyboard.area, screen);
         let (x, y) = (keyboard.position.x, keyboard.position.y);
         let right = u32::from(x) + u32::from(keyboard.area.w);
@@ -463,41 +506,57 @@ fn check_input(a: &mut Analysis, location: &str, input: &Input, context: &Contex
                 ),
             );
         }
-        if !context.key_pages.contains(&keyboard.page) {
+        let page = keyboard.page.as_str();
+        if !context.pages.contains_key(page) {
+            a.error(
+                location,
+                format!("keyboard page {page} is not a declared page"),
+            );
+        } else if !context.key_pages.contains(page) {
             a.warning(
                 location,
-                format!("keyboard page {} has no key controls", keyboard.page),
+                format!("keyboard page {page} has no key controls"),
             );
         }
     }
-    check_touch_pages(a, location, input.next_page, input.pressed_page, context);
+    check_touch_pages(
+        a,
+        location,
+        input.next_page.as_deref(),
+        input.pressed_page.as_deref(),
+        context,
+    );
 }
 
 fn check_touch_pages(
     a: &mut Analysis,
     location: &str,
-    next_page: Option<u16>,
-    pressed_page: Option<u16>,
+    next_page: Option<&str>,
+    pressed_page: Option<&str>,
     context: &Context,
 ) {
-    let background_ids = context.backgrounds.map(|(_, ids)| ids);
-    if let Some(page) = next_page {
-        let known =
-            context.pages.contains(&page) || background_ids.is_some_and(|ids| ids.contains(&page));
-        if !known {
-            a.warning(
-                location,
-                format!("next_page {page} is not a page of this project"),
-            );
-        }
-    }
-    if let (Some(page), Some((file, ids))) = (pressed_page, context.backgrounds)
-        && !ids.contains(&page)
+    if let Some(page) = next_page
+        && !context.pages.contains_key(page)
     {
-        a.warning(
-            location,
-            format!("pressed_page {page} has no background image in {file}.icl"),
-        );
+        a.error(location, format!("next_page {page} is not a declared page"));
+    }
+    if let Some(page) = pressed_page {
+        match context.pages.get(page) {
+            None => a.error(
+                location,
+                format!("pressed_page {page} is not a declared page"),
+            ),
+            Some(id) => {
+                if let Some((icl, images)) = context.backgrounds
+                    && !images.contains(id)
+                {
+                    a.warning(
+                        location,
+                        format!("pressed_page {page} has no background image in {icl}.icl"),
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -541,10 +600,7 @@ fn check_icon(a: &mut Analysis, location: &str, icon: &Icon, context: &Context) 
         if !context.icl_ids.contains(&lib) {
             a.error(
                 location,
-                format!(
-                    "icon_lib {lib} is not an ICL declared in {}",
-                    context.project_file
-                ),
+                format!("icon_lib {lib} is not a declared [[icl]]"),
             );
             return;
         }
