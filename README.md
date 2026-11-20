@@ -1,6 +1,6 @@
 # degus
 
-Build DWIN T5L display projects from TOML.
+Build DWIN T5L display panels from Rust.
 
 Are you tired of using DisGUSting UI editor tools?
 
@@ -15,120 +15,93 @@ Are you tired of using DisGUSting UI editor tools?
 There has to be a better way. Why spend ATP when you can spend electricity?
 Your agent already writes the firmware. Now, with degus, it builds the panel too.
 
-degus replaces the clicking with text. A project is TOML files beside your
-images and sounds, and a command-line build writes the `DWIN_SET` folder the
-display downloads. The agent writes the panel next to the firmware,
-`degus check` catches mistakes before the display does, and every change
-shows up in a diff.
+degus replaces the clicking with code. Your panel is a small Rust program
+beside its images and sounds: it describes the pages, their controls and
+the libraries, and degus writes the `DWIN_SET` folder the display downloads.
+The compiler and degus's check catch mistakes before the display does, and
+every change shows up in a diff.
 
-```toml
-# A page with a button that writes 1 to VP 0x1000, and an icon that shows
-# its value.
-[page.home]
-id = 0
-controls = ["fan", "fan_on"]
+## How a project fits together
 
-[control.fan_on]
-type = "button"
-area = { x = 300, y = 200, w = 120, h = 60 }
-vp = 0x1000
-value = 1
+A typical product has three crates:
 
-[control.fan]
-type = "icon"
-vp = 0x1000
-position = { x = 100, y = 200 }
-icon_lib = 40
-val_max = 1
-icon_min = 0
-icon_max = 1
-```
+- **`ui`**, shared by the other two: page IDs, VP addresses, icon IDs and
+  the types behind them. It needs no dependencies, not even degus, so it
+  builds for the firmware too.
+- **The panel**, a program depending on `ui` and `degus`. It builds the
+  icon and audio libraries from images and sounds, places the controls on
+  the pages, checks the result and writes `DWIN_SET`.
+- **The firmware**, depending on `ui` and `degus-codec`, which builds and
+  parses the frames the display speaks on its UART.
+
+Because both sides take their VPs from `ui`, the panel and the firmware
+cannot disagree about them.
 
 ## Install
 
-```sh
-cargo install --git https://github.com/phycrax/degus
-```
-
-For the simulator's window, add `--features gui`; it plays the display's
-sounds too, which on Linux needs the ALSA development package
-(`libasound2-dev`). `--features serial` also lets a host connect over a
-serial port.
-
-## Use
+degus is not on crates.io yet:
 
 ```sh
-degus new my-hmi --screen 800x480   # creates my-hmi/project.toml
-degus check my-hmi                  # reports problems
-degus build my-hmi                  # writes my-hmi/target/DWIN_SET
-degus sim my-hmi                    # runs it on a simulated display
-degus guide                         # prints the project format
+cargo add degus --git https://github.com/phycrax/degus
 ```
 
-Then download `DWIN_SET` to the display from an SD card. The project format,
-with a complete example, is in [docs/project-format.md](docs/project-format.md),
-which `degus guide` also prints.
+The panel program runs with `cargo run`. Copy the `DWIN_SET` folder it
+writes to an SD card and download it to the display.
+
+## What degus does
+
+- A `Bundle` holds everything in `DWIN_SET`: the configuration, the touch
+  and display controls of every page, the icon and audio libraries by file
+  number, and any other files, such as fonts.
+- `Bundle::check` reports problems by location: controls off the screen,
+  icons and libraries a control names but the bundle lacks, pages without
+  a background, icons too large for the chip, files that run into each
+  other in flash, and more.
+- `Bundle::write` checks the bundle, refuses it on errors and writes the
+  folder.
+- `Bundle::read` reads a folder back, including one made by DWIN's tools.
+
+The formats it writes, and reads back:
+
+- ICL image libraries, from PNG, BMP, JPEG and GIF;
+- WAE audio libraries, from WAV, MP3, FLAC and Ogg Vorbis;
+- Touch (13) and Display (14) control files, with these controls for now:
+  return key code, basic touch, data input, variable icon, data variable,
+  text display and progress bar. Other controls in files made by DWIN's
+  tools are kept as they are;
+- panel configuration, `T5LCFG.CFG`.
+
+Other DGUS controls and building fonts are TODO, tokens are welcome. A
+simulator that runs a built `DWIN_SET` is planned.
 
 ## With coding agents
 
-degus is made so agents can build the panel along with the firmware. To point
-an agent at your panel, add something like this to your firmware repository's
-`AGENTS.md` or `CLAUDE.md`:
+degus is made so agents can build the panel along with the firmware. To
+point an agent at your panel, add something like this to your firmware
+repository's `AGENTS.md` or `CLAUDE.md`:
 
 ```markdown
 ## Display panel
 
-`panel/` is a degus project for the DWIN T5L display. Run `degus guide` before
-editing it and `degus check panel` after each change; `degus build panel`
-writes `panel/target/DWIN_SET`. The panel and the firmware share data only
-through VPs, so keep the firmware's VP addresses in sync with the controls
-files. To see a change, write a script of VP writes, touches and `shot`
-lines and run `degus sim panel --script <file>`; it saves screenshots and
-fails on unmet `expect` lines.
+`panel/` builds the DWIN T5L display's `DWIN_SET` folder with the degus
+library; `cargo run -p panel` checks it and writes the folder. The panel
+and the firmware share data only through VPs, which both take from the
+`ui` crate. Keep page IDs, VPs and icon IDs there, never as literals in
+either side.
 ```
-
-## Simulator
-
-`degus sim` runs a project on a simulated display, straight from the TOML
-and images, without building. A script runs headless: VP writes and reads
-as the host, touches, screenshots and expectations, for tests and agents. A
-window (`--features gui`) takes clicks as touches, shows the VPs and logs
-what passes between host and display, and plays the clips and beeps the
-display would. With `--tcp`, or `--serial` (`--features serial`), the
-firmware drives it with DGUS frames, as it would the panel's UART2.
-
-It is a preview: fonts are a stand-in, images skip the JPEG round trip, and
-where DWIN's guide is silent the simulator guesses
-([crates/sim/ASSUMPTIONS.md](crates/sim/ASSUMPTIONS.md)). Check the result
-on the display.
-
-The frames come from `degus-codec`, which firmware can use for the host's
-side of the link.
-
-## Building capabilities
-
-- ICL image libraries, from PNG, BMP, JPEG and GIF;
-- WAE audio libraries, from WAV, MP3, FLAC and Ogg Vorbis;
-- Touch (13) and Display (14) control files, with these controls for now: return
-  key code, basic touch, data input, variable icon, data variable, text
-  display and progress bar;
-- panel configuration, `T5LCFG.CFG`.
-
-Other files, such as fonts, are copied into `DWIN_SET` as they are. Other
-DGUS controls and building fonts are TODO, tokens are welcome.
 
 ## Crates
 
+The panel depends on `degus` alone, which re-exports the format crates as
+`degus::icl`, `degus::wae`, `degus::controls` and `degus::config`.
+
 | Crate | |
 |-------|---|
-| `degus` | The command-line tool. |
-| `degus-project` | Loads, checks and builds projects. |
-| `degus-sim` | The display simulator. |
-| `degus-sim-gui` | The simulator's window. |
-| `degus-icl` | ICL image lib builder. |
-| `degus-wae` | WAE audio lib builder. |
-| `degus-controls` | Touch (13) and display (14) controls builder. |
+| `degus` | Bundles: check, write and read `DWIN_SET`. |
+| `degus-icl` | ICL image libraries. |
+| `degus-wae` | WAE audio libraries. |
+| `degus-controls` | Touch (13) and display (14) control files. |
 | `degus-config` | `T5LCFG.CFG`. |
-| `degus-codec` | UART frames, for either end of the link. `no_std`. |
+| `degus-codec` | UART frames, for either end of the link. `no_std`, for the firmware. |
 
 degus is an independent project, not affiliated with DWIN Technology.
