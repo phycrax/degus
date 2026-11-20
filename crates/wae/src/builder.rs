@@ -3,10 +3,9 @@ use std::path::PathBuf;
 
 use crate::audio;
 use crate::error::{Error, Result};
-use crate::format::{
-    CRC_START, ENTRY_LEN, HEADER_LEN, MAGIC, SAMPLE_RATE, VERSION, checksum, round_up_block,
-};
+use crate::format::SAMPLE_RATE;
 use crate::options::{Downmix, WaeOptions};
+use crate::wae::Wae;
 
 /// Where a clip's audio comes from.
 #[derive(Debug, Clone)]
@@ -17,30 +16,11 @@ pub enum ClipSource {
     Encoded(Vec<u8>),
     /// Mono 16-bit samples at `rate` Hz.
     Samples { rate: u32, samples: Vec<i16> },
-    /// Clip data already in the builder's sample format, stored unchanged.
+    /// Clip data already in the builder's sample format.
     Raw(Vec<u8>),
 }
 
-/// Per-clip details of a built WAE.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClipReport {
-    pub id: u16,
-    /// Absolute offset of the clip data in the file.
-    pub offset: u32,
-    /// Clip data length in bytes, excluding block padding.
-    pub len: u32,
-    pub samples: usize,
-}
-
-/// A serialized WAE file.
-#[derive(Debug, Clone)]
-pub struct BuiltWae {
-    pub bytes: Vec<u8>,
-    /// One entry per clip, in ID order.
-    pub clips: Vec<ClipReport>,
-}
-
-/// Collects audio clips by ID and serializes them into a WAE file.
+/// Collects audio clips by ID and converts them into a [`Wae`].
 #[derive(Debug, Clone, Default)]
 pub struct WaeBuilder {
     pub options: WaeOptions,
@@ -81,77 +61,39 @@ impl WaeBuilder {
         self.clips.keys().copied()
     }
 
-    /// Converts all clips and serializes the WAE file.
-    pub fn build(&self) -> Result<BuiltWae> {
-        let max_id = *self.clips.keys().next_back().ok_or(Error::Empty)?;
-        let count = u16::try_from(self.clips.len()).map_err(|_| Error::TooManyClips)?;
-        let data_start = round_up_block(HEADER_LEN + ENTRY_LEN * (usize::from(max_id) + 1));
-        let mut bytes = vec![0; data_start];
-        bytes[..6].copy_from_slice(&MAGIC);
-        bytes[12] = VERSION;
-        bytes[13..15].copy_from_slice(&count.to_be_bytes());
-        bytes[15] = self.options.format.code();
-
-        let mut clips = Vec::with_capacity(self.clips.len());
+    /// Decodes, downmixes and resamples every clip: the slow part of making
+    /// a WAE. Each clip holds the samples the display plays, so a
+    /// [`SampleFormat::Companded8`] clip already carries its loss.
+    ///
+    /// [`SampleFormat::Companded8`]: crate::SampleFormat::Companded8
+    pub fn build(&self) -> Result<Wae> {
+        let mut wae = Wae::new(self.options.format);
         for (&id, source) in &self.clips {
-            let data = self.encode(source).map_err(|e| Error::Clip {
+            let samples = self.stored_samples(source).map_err(|e| Error::Clip {
                 id,
                 source: Box::new(e),
             })?;
-            let offset = u32::try_from(bytes.len()).map_err(|_| Error::FileTooLarge)?;
-            let len = u32::try_from(data.len()).map_err(|_| Error::FileTooLarge)?;
-            let entry = HEADER_LEN + ENTRY_LEN * usize::from(id);
-            bytes[entry..entry + 4].copy_from_slice(&offset.to_be_bytes());
-            bytes[entry + 4..entry + 8].copy_from_slice(&len.to_be_bytes());
-            bytes.extend_from_slice(&data);
-            bytes.resize(round_up_block(bytes.len()), 0);
-            clips.push(ClipReport {
-                id,
-                offset,
-                len,
-                samples: data.len() / self.options.format.bytes_per_sample(),
-            });
+            wae.clips.insert(id, samples);
         }
-
-        let length = u32::try_from(bytes.len() - CRC_START).map_err(|_| Error::FileTooLarge)?;
-        bytes[8..12].copy_from_slice(&length.to_be_bytes());
-        let crc = checksum(&bytes[CRC_START..]);
-        bytes[6..8].copy_from_slice(&crc.to_le_bytes());
-        Ok(BuiltWae { bytes, clips })
+        Ok(wae)
     }
 
-    /// Converts one clip into the builder's sample format.
-    fn encode(&self, source: &ClipSource) -> Result<Vec<u8>> {
-        match source {
-            ClipSource::Raw(data) if data.is_empty() => Err(Error::EmptyAudio),
-            ClipSource::Raw(data) => Ok(data.clone()),
-            _ => Ok(self
-                .options
-                .format
-                .encode(&convert(source, self.options.downmix)?)),
-        }
+    /// The samples of `source` after a trip through the sample format.
+    fn stored_samples(&self, source: &ClipSource) -> Result<Vec<i16>> {
+        let format = self.options.format;
+        let stored = match source {
+            ClipSource::Raw(data) if data.is_empty() => return Err(Error::EmptyAudio),
+            ClipSource::Raw(data) => data.clone(),
+            _ => format.encode(&convert(source, self.options.downmix)?),
+        };
+        Ok(format.decode(&stored))
     }
-}
-
-/// The samples the display plays for `source`: mono 16-bit at
-/// [`SAMPLE_RATE`], converted as the build converts them and passed through
-/// `options.format`, so a [`SampleFormat::Companded8`] clip keeps its loss.
-/// [`ClipSource::Raw`] data is decoded from `options.format`.
-///
-/// [`SampleFormat::Companded8`]: crate::SampleFormat::Companded8
-pub fn clip_samples(source: &ClipSource, options: &WaeOptions) -> Result<Vec<i16>> {
-    let stored = match source {
-        ClipSource::Raw(data) if data.is_empty() => return Err(Error::EmptyAudio),
-        ClipSource::Raw(data) => data.clone(),
-        _ => options.format.encode(&convert(source, options.downmix)?),
-    };
-    Ok(options.format.decode(&stored))
 }
 
 /// Decodes, downmixes and resamples a clip that is not [`ClipSource::Raw`].
 fn convert(source: &ClipSource, downmix: Downmix) -> Result<Vec<i16>> {
     let decoded = match source {
-        ClipSource::Raw(_) => unreachable!("raw clips are stored as they are"),
+        ClipSource::Raw(_) => unreachable!("raw clips are not converted"),
         ClipSource::Samples { rate, samples } => audio::Decoded {
             samples: audio::to_f32(samples),
             rate: *rate,

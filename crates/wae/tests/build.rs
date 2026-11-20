@@ -2,7 +2,7 @@ use std::f32::consts::TAU;
 use std::path::{Path, PathBuf};
 
 use crc::{CRC_16_MODBUS, Crc};
-use degus_wae::{ClipSource, Downmix, Error, SampleFormat, WaeBuilder, WaeOptions};
+use degus_wae::{ClipSource, Downmix, Error, SampleFormat, Wae, WaeBuilder, WaeOptions};
 
 /// Fade-in length at 32 kHz (5 ms).
 const RAMP: usize = 160;
@@ -87,7 +87,7 @@ fn samples_of(data: &[u8]) -> Vec<i16> {
 
 /// The single clip of a one-clip 16-bit PCM build.
 fn built_samples(builder: &WaeBuilder, id: u16) -> Vec<i16> {
-    let bytes = builder.build().unwrap().bytes;
+    let bytes = builder.build().unwrap().to_bytes().unwrap();
     check_header(&bytes, 1, 0);
     samples_of(clip(&bytes, id))
 }
@@ -121,8 +121,8 @@ fn builds_block_aligned_wae_with_id_gaps() {
     for (id, input) in &clips {
         builder.insert(*id, samples(32_000, input));
     }
-    let built = builder.build().unwrap();
-    let bytes = &built.bytes;
+    let wae = builder.build().unwrap();
+    let bytes = &wae.to_bytes().unwrap();
     check_header(bytes, 3, 0);
     assert_eq!(bytes.len() % 4096, 0);
 
@@ -134,14 +134,12 @@ fn builds_block_aligned_wae_with_id_gaps() {
     );
     // The table fits in the first block, so the first clip starts at 4 KB.
     assert_eq!(entry(bytes, 0).0, 4096);
-    for ((id, input), report) in clips.iter().zip(&built.clips) {
+    for (id, input) in &clips {
         let (offset, len) = entry(bytes, *id);
-        assert_eq!(report.id, *id);
         assert_eq!(offset % 4096, 0);
-        assert_eq!(offset, report.offset as usize);
-        assert_eq!(len, report.len as usize);
         assert_eq!(len, (input.len() + 1) * 2);
-        assert_converted(&samples_of(clip(bytes, *id)), input);
+        assert_eq!(samples_of(clip(bytes, *id)), wae.clips[id]);
+        assert_converted(&wae.clips[id], input);
     }
 }
 
@@ -149,7 +147,7 @@ fn builds_block_aligned_wae_with_id_gaps() {
 fn large_ids_push_data_to_the_next_block() {
     let mut builder = WaeBuilder::new(WaeOptions::default());
     builder.insert(600, samples(32_000, &[5; 10]));
-    let bytes = builder.build().unwrap().bytes;
+    let bytes = builder.build().unwrap().to_bytes().unwrap();
     // 16 + 8 * 601 bytes of table round up to 8 KB.
     assert_eq!(entry(&bytes, 600).0, 8192);
 }
@@ -162,7 +160,7 @@ fn companded_clips_use_one_byte_per_sample() {
         ..WaeOptions::default()
     });
     builder.insert(1, samples(32_000, &input));
-    let bytes = builder.build().unwrap().bytes;
+    let bytes = builder.build().unwrap().to_bytes().unwrap();
     check_header(&bytes, 1, 1);
     let codes = clip(&bytes, 1);
     assert_eq!(codes.len(), input.len() + 1);
@@ -240,31 +238,34 @@ fn downmix_keeps_left_or_averages() {
 #[test]
 fn rejects_bad_input() {
     let mut builder = WaeBuilder::new(WaeOptions::default());
-    assert!(matches!(builder.build(), Err(Error::Empty)));
+    let empty = builder.build().unwrap();
+    assert_eq!(empty, Wae::new(SampleFormat::Pcm16));
+    assert!(matches!(empty.to_bytes(), Err(Error::Empty)));
     builder.insert(0, samples(32_000, &[]));
     assert!(matches!(builder.build(), Err(Error::Clip { id: 0, .. })));
     builder.insert(0, ClipSource::Encoded(b"not audio".to_vec()));
     assert!(matches!(builder.build(), Err(Error::Clip { id: 0, .. })));
+
+    let mut wae = Wae::new(SampleFormat::Pcm16);
+    wae.clips.insert(4, Vec::new());
+    assert!(matches!(wae.to_bytes(), Err(Error::Clip { id: 4, .. })));
 }
 
 #[test]
-fn clip_samples_are_what_the_build_stores() {
+fn clips_hold_what_the_file_stores() {
     let source = samples(44_100, &sine(44_100, 440.0, 0.2, 12_000.0));
     for format in [SampleFormat::Pcm16, SampleFormat::Companded8] {
-        let options = WaeOptions {
+        let mut builder = WaeBuilder::new(WaeOptions {
             format,
             ..WaeOptions::default()
-        };
-        let mut builder = WaeBuilder::new(options.clone());
+        });
         builder.insert(3, source.clone());
-        let bytes = builder.build().unwrap().bytes;
-        let stored = format.decode(clip(&bytes, 3));
-        assert_eq!(degus_wae::clip_samples(&source, &options).unwrap(), stored);
+        let wae = builder.build().unwrap();
+        let bytes = wae.to_bytes().unwrap();
+        assert_eq!(format.decode(clip(&bytes, 3)), wae.clips[&3]);
     }
     // Raw data is decoded as it is.
-    let raw = ClipSource::Raw(vec![0x01, 0x00, 0xFF, 0xFF]);
-    assert_eq!(
-        degus_wae::clip_samples(&raw, &WaeOptions::default()).unwrap(),
-        [1, -1]
-    );
+    let mut builder = WaeBuilder::new(WaeOptions::default());
+    builder.insert(0, ClipSource::Raw(vec![0x01, 0x00, 0xFF, 0xFF]));
+    assert_eq!(builder.build().unwrap().clips[&0], [1, -1]);
 }
