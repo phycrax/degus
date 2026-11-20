@@ -9,9 +9,6 @@
 //! panel; take them from the display's own CFG file if they must be
 //! rewritten.
 //!
-//! The `serde` feature derives `Serialize` and `Deserialize` for the
-//! enums and blocks, using snake_case names and rotations in degrees.
-//!
 //! ```no_run
 //! use degus_config::{Config, Rotation};
 //!
@@ -21,7 +18,7 @@
 //!     brightness: 80,
 //!     ..Config::default()
 //! };
-//! std::fs::write(format!("DWIN_SET/{}", degus_config::FILE_NAME), config.build()?)?;
+//! std::fs::write(format!("DWIN_SET/{}", degus_config::FILE_NAME), config.to_bytes()?)?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 

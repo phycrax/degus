@@ -15,7 +15,7 @@ fn padded(bytes: &[u8]) -> Vec<u8> {
 #[test]
 fn default_config_writes_only_the_system_settings() {
     assert_eq!(
-        Config::default().build().unwrap(),
+        Config::default().to_bytes().unwrap(),
         padded(&hex!("54354c4331 18 00 00 20 28 001c 64 00 03e8"))
     );
 }
@@ -35,7 +35,7 @@ fn system_settings_match_the_template_shipped_with_the_dgus_editor() {
         standby_delay: 0,
         ..Config::default()
     }
-    .build()
+    .to_bytes()
     .unwrap();
     assert_eq!(file[..0x10], template[..0x10]);
 }
@@ -93,7 +93,7 @@ fn writes_every_block() {
         sd_folder: Some("RGZN_SET".into()),
         backlight_delay: Some(0x0A),
     };
-    let file = config.build().unwrap();
+    let file = config.to_bytes().unwrap();
     assert_eq!(file.len(), FILE_LEN);
     assert_eq!(
         file[..0x50],
@@ -115,6 +115,9 @@ fn converts_baud_rates() {
     assert_eq!(Config::divisor_for_baud(9600), Some(0x0150));
     assert_eq!(Config::divisor_for_baud(0), None);
     assert_eq!(Config::divisor_for_baud(3000), None);
+    // 460800 baud is divisor 7 exactly; 921600 would be 3.5, and 4 is 12 % off.
+    assert_eq!(Config::divisor_for_baud(460_800), Some(7));
+    assert_eq!(Config::divisor_for_baud(921_600), None);
     let config = Config {
         baud_divisor: 13,
         ..Config::default()
@@ -125,7 +128,7 @@ fn converts_baud_rates() {
 
 #[test]
 fn rejects_values_out_of_range() {
-    let error = |config: Config| config.build().unwrap_err().to_string();
+    let error = |config: Config| config.to_bytes().unwrap_err().to_string();
     assert_eq!(
         error(Config {
             brightness: 101,
@@ -153,7 +156,7 @@ fn rejects_values_out_of_range() {
             sd_folder: Some("TOO_LONG_NAME".into()),
             ..Config::default()
         }
-        .build(),
+        .to_bytes(),
         Err(Error::SdFolder(_))
     );
 }

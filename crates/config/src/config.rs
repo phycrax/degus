@@ -152,11 +152,6 @@ impl Default for Config {
 
 /// What plays touch sounds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(rename_all = "snake_case")
-)]
 pub enum Audio {
     #[default]
     Buzzer,
@@ -167,11 +162,6 @@ pub enum Audio {
 /// Display direction. Pages are drawn for the rotated screen: at 90° and
 /// 270°, an 800x480 panel shows 480x800 pages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(try_from = "u16", into = "u16")
-)]
 #[repr(u8)]
 pub enum Rotation {
     #[default]
@@ -202,39 +192,16 @@ impl Rotation {
     }
 }
 
-impl TryFrom<u16> for Rotation {
-    type Error = String;
-
-    fn try_from(degrees: u16) -> Result<Self, String> {
-        Self::from_degrees(degrees)
-            .ok_or_else(|| format!("rotation {degrees} is not 0, 90, 180 or 270"))
-    }
-}
-
-impl From<Rotation> for u16 {
-    fn from(rotation: Rotation) -> Self {
-        rotation.degrees()
-    }
-}
-
 /// Size of an added SPI NAND flash.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum NandSize {
-    #[cfg_attr(feature = "serde", serde(rename = "1gbit"))]
     Gbit1,
-    #[cfg_attr(feature = "serde", serde(rename = "4gbit"))]
     Gbit4,
 }
 
 /// LCD timing, set at the factory for the panel. Wrong values leave the
 /// screen white or flickering. Fields are named as in DWIN's guide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(deny_unknown_fields)
-)]
 pub struct Lcd {
     /// 0x12: data latch phase, 0 = PCLK rising, 1 = PCLK falling.
     pub pclk_phs: u8,
@@ -257,17 +224,11 @@ pub struct Lcd {
     /// 0x1D
     pub v_e: u8,
     /// 0x1E: 0 = no TCON to configure.
-    #[cfg_attr(feature = "serde", serde(default))]
     pub tcon_sel: u8,
 }
 
 /// Touch panel type and tuning, set at the factory for the panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(deny_unknown_fields)
-)]
 pub struct TouchPanel {
     /// 0x21: panel type in the high 4 bits (0x0 4-wire resistive, 0x1
     /// GT911/GT9271/GT9110, …, 0xF 5-wire resistive); bit 3 calibrates a
@@ -278,38 +239,21 @@ pub struct TouchPanel {
     /// 0x10-0xFF on resistive ones (factory 0x40).
     pub sense: u8,
     /// 0x23: scan frequency of ILI9881H panels, 0x01-0x14; 0 hops.
-    #[cfg_attr(feature = "serde", serde(default))]
     pub freq: u8,
 }
 
 /// Clock output on P3.0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(deny_unknown_fields)
-)]
 pub struct ClockOut {
     /// 0x25: drive the output; `false` turns it off.
-    #[cfg_attr(feature = "serde", serde(default = "yes"))]
     pub enabled: bool,
     /// 0x26: frequency is 825.7536 MHz / `div`.
     pub div: u8,
 }
 
-#[cfg(feature = "serde")]
-fn yes() -> bool {
-    true
-}
-
 /// Buzzer tone and length. The defaults are the factory values: a 2.5 kHz
 /// tone at 8 % duty for 100 ms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "serde",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(default, deny_unknown_fields)
-)]
 pub struct Buzzer {
     /// 0x28: frequency is 825.7536 MHz / (`div1` × `div2`).
     pub div1: u8,
@@ -333,16 +277,19 @@ impl Default for Buzzer {
 }
 
 impl Config {
-    /// The divisor nearest to `baud`, if one is in range. The UART then
-    /// runs at [`BAUD_CLOCK`] / divisor, which can differ from `baud`.
+    /// The divisor nearest to `baud`. The UART then runs at [`BAUD_CLOCK`] /
+    /// divisor, which can differ from `baud`. `None` when the divisor is out
+    /// of range or the rate it gives is more than 2 % off.
     pub fn divisor_for_baud(baud: u32) -> Option<u16> {
         if baud == 0 {
             return None;
         }
         let divisor = (BAUD_CLOCK + baud / 2) / baud;
-        u16::try_from(divisor)
+        let divisor = u16::try_from(divisor)
             .ok()
-            .filter(|d| (1..=MAX_BAUD_DIVISOR).contains(d))
+            .filter(|d| (1..=MAX_BAUD_DIVISOR).contains(d))?;
+        let actual = BAUD_CLOCK / u32::from(divisor);
+        (actual.abs_diff(baud) <= baud / 50).then_some(divisor)
     }
 
     /// The UART speed `baud_divisor` gives, rounded to a whole baud.
@@ -352,7 +299,7 @@ impl Config {
     }
 
     /// Writes the file: [`FILE_LEN`] bytes, with disabled blocks zeroed.
-    pub fn build(&self) -> Result<Vec<u8>> {
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
         self.validate()?;
         let mut b = vec![0; FILE_LEN];
         b[..MAGIC.len()].copy_from_slice(MAGIC);
