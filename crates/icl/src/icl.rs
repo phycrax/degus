@@ -10,8 +10,8 @@ use crate::jpeg::PreparedJpeg;
 
 /// An icon library: icons by ID.
 ///
-/// [`IclBuilder`](crate::IclBuilder) makes one from images, and
-/// [`Icl::to_bytes`] writes it as a file.
+/// [`IclBuilder`](crate::IclBuilder) makes one from images,
+/// [`Icl::to_bytes`] writes it as a file and [`Icl::from_bytes`] reads one.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Icl {
     pub icons: BTreeMap<u16, Icon>,
@@ -19,7 +19,8 @@ pub struct Icl {
 
 /// An icon: a baseline JPEG laid out the way the T5L decodes it.
 ///
-/// [`IclBuilder`](crate::IclBuilder) makes icons from images.
+/// [`IclBuilder`](crate::IclBuilder) makes icons from images, and
+/// [`Icl::from_bytes`] reads them from files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Icon {
     width: u16,
@@ -74,6 +75,37 @@ impl Icon {
         jpeg
     }
 
+    /// Decodes the icon's pixels.
+    pub fn decode(&self) -> Result<image::RgbImage> {
+        let image = image::load_from_memory_with_format(&self.jpeg(), image::ImageFormat::Jpeg)?;
+        Ok(image.to_rgb8())
+    }
+
+    /// An icon as a record stores it, after checking that its header ends
+    /// with an SOS segment that holds its components.
+    fn from_record(width: u16, height: u16, header_len: u16, data: &[u8]) -> Result<Self> {
+        let header = data
+            .get(..usize::from(header_len))
+            .ok_or(Error::Damaged("its JPEG header is longer than its record"))?;
+        let sos = header
+            .windows(2)
+            .rposition(|w| w == [0xFF, 0xDA])
+            .filter(|_| header.starts_with(&[0xFF, 0xD8]))
+            .ok_or(Error::Damaged("its record holds no JPEG header"))?;
+        let components = header
+            .get(sos + 4)
+            .ok_or(Error::Damaged("its JPEG scan header is cut short"))?;
+        if sos + 2 + 6 + 2 * usize::from(*components) > header.len() {
+            return Err(Error::Damaged("its JPEG scan header is cut short"));
+        }
+        Ok(Self {
+            width,
+            height,
+            header_len,
+            data: data.to_vec(),
+        })
+    }
+
     /// Bytes of the icon's record: its header and the stored JPEG.
     fn record_len(&self) -> usize {
         RECORD_HEADER_LEN + self.data.len()
@@ -83,6 +115,43 @@ impl Icon {
 impl Icl {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Reads an ICL file. Encrypted ICLs are not supported.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Icl> {
+        if bytes.len() < HEADER_LEN || bytes[..6] != MAGIC {
+            return Err(Error::NotIcl);
+        }
+        if bytes[12] != VERSION {
+            return Err(Error::Version(bytes[12]));
+        }
+        if bytes[15] != 0 {
+            return Err(Error::Encrypted(bytes[15]));
+        }
+        if be32(bytes, 8) as usize != bytes.len() - CRC_START {
+            return Err(Error::Damaged("its length field does not match its length"));
+        }
+        if u16::from_le_bytes([bytes[6], bytes[7]]) != checksum(&bytes[CRC_START..]) {
+            return Err(Error::Damaged("its CRC does not match"));
+        }
+        let max_id = u16::from_be_bytes([bytes[13], bytes[14]]);
+        if HEADER_LEN + 4 * (usize::from(max_id) + 1) > bytes.len() {
+            return Err(Error::Damaged("its offset table runs past its end"));
+        }
+
+        let mut icl = Icl::new();
+        for id in 0..=max_id {
+            let offset = be32(bytes, HEADER_LEN + 4 * usize::from(id)) as usize;
+            if offset == 0 {
+                continue;
+            }
+            let icon = read_record(bytes, offset).map_err(|source| Error::Icon {
+                id,
+                source: Box::new(source),
+            })?;
+            icl.icons.insert(id, icon);
+        }
+        Ok(icl)
     }
 
     /// Writes the ICL file for file number `file`.
@@ -124,6 +193,26 @@ impl Icl {
         bytes[6..8].copy_from_slice(&crc.to_le_bytes());
         Ok(bytes)
     }
+}
+
+/// The icon whose record starts at `offset`.
+fn read_record(bytes: &[u8], offset: usize) -> Result<Icon> {
+    let header = bytes
+        .get(offset..offset + RECORD_HEADER_LEN)
+        .ok_or(Error::Damaged("its record runs past the end of the file"))?;
+    let width = u16::from_be_bytes([header[0], header[1]]);
+    let height = u16::from_be_bytes([header[2], header[3]]);
+    let header_len = u16::from_be_bytes([header[4], header[5]]);
+    let stream_len = be32(header, 6) as usize;
+    let start = offset + RECORD_HEADER_LEN;
+    let data = bytes
+        .get(start..start + usize::from(header_len) + stream_len)
+        .ok_or(Error::Damaged("its record runs past the end of the file"))?;
+    Icon::from_record(width, height, header_len, data)
+}
+
+fn be32(bytes: &[u8], at: usize) -> u32 {
+    u32::from_be_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
 }
 
 /// Zero bytes to insert before a record of `size` bytes that would start at

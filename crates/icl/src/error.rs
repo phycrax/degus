@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// Errors produced while building ICL files.
+/// Errors produced while building, writing or reading ICL files.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("{}: {source}", path.display())]
@@ -31,6 +31,14 @@ pub enum Error {
     Empty,
     #[error("ICL data exceeds 4 GiB")]
     FileTooLarge,
+    #[error("not an ICL file: it does not start with DGUS_3")]
+    NotIcl,
+    #[error("ICL version {0} is not supported, only 4")]
+    Version(u8),
+    #[error("the ICL is encrypted (method {0}), which is not supported")]
+    Encrypted(u8),
+    #[error("damaged ICL file: {0}")]
+    Damaged(&'static str),
 }
 
 /// Reasons a JPEG cannot be stored in an ICL record as-is.

@@ -1,11 +1,11 @@
-//! Builds DWIN T5L ICL icon libraries (`DGUS_3` format).
+//! Builds and reads DWIN T5L ICL icon libraries (`DGUS_3` format).
 //!
 //! An ICL file is a 16-byte header, a table of big-endian `u32` record
 //! offsets indexed by icon ID, and one record per icon: a 10-byte record
 //! header followed by a baseline JPEG whose scan data is 4-byte aligned.
 //!
-//! [`IclBuilder`] encodes images into an [`Icl`], and [`Icl::to_bytes`]
-//! writes the file for its file number.
+//! [`IclBuilder`] encodes images into an [`Icl`], [`Icl::to_bytes`] writes
+//! the file for its file number and [`Icl::from_bytes`] reads one.
 //!
 //! ```no_run
 //! use degus_icl::{IclBuilder, IclOptions, IconSource};
@@ -30,6 +30,6 @@ pub use builder::{IclBuilder, IconSource};
 pub use error::{Error, JpegError, Result};
 pub use format::{MAGIC, VERSION};
 pub use icl::{Icl, Icon};
-/// The `image` crate, whose types [`IconSource`] takes.
+/// The `image` crate, whose types [`IconSource`] and [`Icon::decode`] use.
 pub use image;
 pub use options::{Chip, IclOptions, OversizePolicy, Subsampling};

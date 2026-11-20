@@ -279,3 +279,63 @@ fn an_empty_icl_cannot_be_written() {
     assert_eq!(icl, Icl::new());
     assert!(matches!(icl.to_bytes(32), Err(Error::Empty)));
 }
+
+#[test]
+fn reads_what_it_writes() {
+    let mut builder = IclBuilder::new(IclOptions {
+        quality: 100,
+        subsampling: Subsampling::S444,
+        ..IclOptions::default()
+    });
+    builder.insert(0, IconSource::Image(gradient(64, 48)));
+    builder.insert(9, IconSource::Image(gradient(3, 200)));
+    for id in 20..24 {
+        builder.insert(id, IconSource::Image(noise(160, 120, u32::from(id))));
+    }
+    let icl = builder.build().unwrap();
+    // File 63's records are moved to the 16 MB boundary; reading skips the
+    // gap.
+    for file in [32, 63] {
+        let bytes = icl.to_bytes(file).unwrap();
+        assert_eq!(Icl::from_bytes(&bytes).unwrap(), icl);
+    }
+}
+
+#[test]
+fn decodes_icons() {
+    let image = gradient(64, 48);
+    let mut builder = IclBuilder::new(IclOptions::default());
+    builder.insert(4, IconSource::Image(image.clone()));
+    let bytes = builder.build().unwrap().to_bytes(32).unwrap();
+    let icon = &Icl::from_bytes(&bytes).unwrap().icons[&4];
+    let decoded = icon.decode().unwrap();
+    assert_eq!(decoded.dimensions(), (64, 48));
+    assert!(mean_abs_diff(&decoded, &image.to_rgb8()) < 6.0);
+    assert_eq!(decoded, record(&bytes, 4).decode());
+}
+
+#[test]
+fn rejects_what_it_cannot_read() {
+    let mut builder = IclBuilder::new(IclOptions::default());
+    builder.insert(1, IconSource::Image(gradient(8, 8)));
+    let bytes = builder.build().unwrap().to_bytes(32).unwrap();
+    let changed = |at: usize, value: u8| {
+        let mut bytes = bytes.clone();
+        bytes[at] = value;
+        Icl::from_bytes(&bytes)
+    };
+
+    assert!(matches!(Icl::from_bytes(b"DGUS_2"), Err(Error::NotIcl)));
+    assert!(matches!(changed(5, b'2'), Err(Error::NotIcl)));
+    assert!(matches!(changed(12, 3), Err(Error::Version(3))));
+    assert!(matches!(changed(15, 1), Err(Error::Encrypted(1))));
+    // A changed byte no longer matches the CRC.
+    assert!(matches!(
+        changed(bytes.len() - 20, 0x55),
+        Err(Error::Damaged(_))
+    ));
+    assert!(matches!(
+        Icl::from_bytes(&bytes[..bytes.len() - 4]),
+        Err(Error::Damaged(_))
+    ));
+}
