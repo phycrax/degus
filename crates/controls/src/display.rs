@@ -1,7 +1,7 @@
-use num_enum::IntoPrimitive;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use crate::error::{Error, Result};
-use crate::geom::{Area, Point, put_u16};
+use crate::geom::{Area, Point, get_u16, put_u16};
 
 /// Every display record is 32 bytes.
 pub(crate) const RECORD_LEN: usize = 32;
@@ -32,6 +32,7 @@ const UNIT_MAX: usize = 11;
 
 /// A display control. Only the controls used so far are supported.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Display {
     /// "Variable icon" (`5A 00`): shows the icon matching a VP value.
     Icon(IconVar),
@@ -41,6 +42,10 @@ pub enum Display {
     Text(TextVar),
     /// "Progress bar" (`5A 23`): fills a box in proportion to a VP.
     Progress(ProgressBar),
+    /// A record read from a file that the types above do not model: a
+    /// control of another type, or one whose settings they cannot hold. It
+    /// is written back as it is.
+    Unknown([u8; RECORD_LEN]),
 }
 
 impl From<IconVar> for Display {
@@ -117,7 +122,7 @@ impl Default for IconVar {
 }
 
 /// How an icon is layered over the page ("Background transparent Mode").
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
 pub enum LayerMode {
     #[default]
@@ -174,7 +179,7 @@ impl Default for DataVar {
 }
 
 /// Alignment of a data variable around its position.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
 pub enum Align {
     #[default]
@@ -184,7 +189,7 @@ pub enum Align {
 }
 
 /// How a data variable reads its VP.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
 pub enum DataType {
     /// Signed 16-bit.
@@ -256,7 +261,7 @@ impl Default for TextVar {
 }
 
 /// Character encoding of a text display.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
 pub enum Encoding {
     /// One byte per character.
@@ -271,7 +276,7 @@ pub enum Encoding {
 }
 
 /// Horizontal alignment of a text display.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
 pub enum TextAlign {
     #[default]
@@ -282,7 +287,7 @@ pub enum TextAlign {
 }
 
 /// Vertical alignment of a text display.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
 pub enum VerticalAlign {
     #[default]
@@ -322,7 +327,7 @@ pub struct ProgressBar {
 }
 
 /// How a progress bar reads its VP.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
 pub enum BarDataType {
     /// Signed 16-bit.
@@ -335,7 +340,7 @@ pub enum BarDataType {
 }
 
 /// The direction a progress bar grows in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
 pub enum BarDirection {
     #[default]
@@ -426,7 +431,116 @@ impl Display {
                 put_u16(&mut r, 30, bar.rate_vp.unwrap_or(0));
                 r
             }
+            Display::Unknown(record) => *record,
         })
+    }
+
+    /// The control a record holds; [`Display::Unknown`] unless one of the
+    /// other types holds every setting.
+    pub(crate) fn decode(r: &Record) -> Self {
+        Self::decode_known(r).unwrap_or(Display::Unknown(*r))
+    }
+
+    fn decode_known(r: &Record) -> Option<Self> {
+        let popup_menu = match r[0] {
+            MARK => false,
+            POPUP_MARK => true,
+            _ => return None,
+        };
+        let sp = Some(get_u16(r, 2)).filter(|&sp| sp != NO_SP);
+        let vp = get_u16(r, 6);
+        Some(match (r[1], get_u16(r, 4)) {
+            (ICON, ICON_LEN) => Display::Icon(IconVar {
+                vp,
+                sp,
+                popup_menu,
+                position: Point::read(r, 8),
+                val_min: get_u16(r, 12),
+                val_max: get_u16(r, 14),
+                icon_min: get_u16(r, 16),
+                icon_max: get_u16(r, 18),
+                icon_lib: r[20],
+                show_background: flag(r[21])?,
+                layer_mode: LayerMode::try_from(r[22]).ok()?,
+                icon_brightness: r[23],
+                background_brightness: r[24],
+                filter: r[25],
+            }),
+            (DATA, DATA_LEN) => {
+                let unit_len = usize::from(r[20]);
+                if unit_len > UNIT_MAX {
+                    return None;
+                }
+                let unit = &r[21..21 + unit_len];
+                Display::Data(DataVar {
+                    vp,
+                    sp,
+                    popup_menu,
+                    position: Point::read(r, 8),
+                    color: get_u16(r, 12),
+                    font: r[14],
+                    font_size: r[15],
+                    align: Align::try_from(r[16] & 0x3F).ok()?,
+                    auto_spacing: r[16] & 0x80 != 0,
+                    leading_zeros: r[16] & 0x40 != 0,
+                    integer_digits: r[17],
+                    decimal_digits: r[18],
+                    data_type: DataType::try_from(r[19]).ok()?,
+                    unit: String::from_utf8(unit.to_vec())
+                        .ok()
+                        .filter(|u| u.is_ascii())?,
+                })
+            }
+            (TEXT, TEXT_LEN) => Display::Text(TextVar {
+                vp,
+                sp,
+                popup_menu,
+                area: Area::read(r, 14),
+                color: get_u16(r, 12),
+                length: get_u16(r, 22),
+                encoding: Encoding::try_from(r[28] & 0x0F).ok()?,
+                ascii_font: r[24],
+                font: r[25],
+                font_width: r[26],
+                font_height: r[27],
+                align: TextAlign::try_from(r[28] >> 5 & 0x03).ok()?,
+                vertical_align: VerticalAlign::try_from(r[28] >> 4 & 0x01).ok()?,
+                auto_spacing: r[28] & 0x80 != 0,
+                char_spacing: r[29],
+                line_spacing: r[30],
+            }),
+            (PROGRESS, PROGRESS_LEN) if !popup_menu => {
+                let flags = r[26];
+                if flags & !(SHOW_RATE | NO_FILL | NO_BORDER) != 0 {
+                    return None;
+                }
+                Display::Progress(ProgressBar {
+                    vp,
+                    sp,
+                    area: Area::read(r, 8),
+                    val_min: get_u16(r, 24).cast_signed(),
+                    val_max: get_u16(r, 22).cast_signed(),
+                    data_type: BarDataType::try_from(r[28]).ok()?,
+                    direction: BarDirection::try_from(r[27]).ok()?,
+                    bar_color: get_u16(r, 18),
+                    border_color: get_u16(r, 16),
+                    background_color: get_u16(r, 20),
+                    show_border: flags & NO_BORDER == 0,
+                    fill_background: flags & NO_FILL == 0,
+                    rate_vp: (flags & SHOW_RATE != 0).then(|| get_u16(r, 30)),
+                })
+            }
+            _ => return None,
+        })
+    }
+}
+
+/// A byte that is 0 or 1.
+fn flag(byte: u8) -> Option<bool> {
+    match byte {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
     }
 }
 

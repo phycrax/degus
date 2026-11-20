@@ -242,8 +242,8 @@ fn empty_project_builds_valid_files() {
     assert_eq!(built.display.len(), RECORDS + 32);
 }
 
-#[test]
-fn writes_every_field() {
+/// Controls that set every field to something other than its default.
+fn every_field() -> Controls {
     let mut controls = Controls::new();
     let page = controls.page_mut(5);
     page.touch.push(Touch {
@@ -387,7 +387,12 @@ fn writes_every_field() {
         .into(),
     );
 
-    let built = controls.to_bytes().unwrap();
+    controls
+}
+
+#[test]
+fn writes_every_field() {
+    let built = every_field().to_bytes().unwrap();
     assert_eq!(
         built.touch,
         hex!(
@@ -525,4 +530,169 @@ fn helpers_give_the_values_the_files_hold() {
         controls.to_bytes().unwrap().touch,
         hex!("0000 0000 0000 000a 000a 0001 ff00 ff00 ffff")
     );
+}
+
+/// File 14 of controls without display controls.
+fn no_displays() -> Vec<u8> {
+    Controls::new().to_bytes().unwrap().display
+}
+
+#[test]
+fn reads_what_it_writes() {
+    let mut editor = Controls::new();
+    editor.page_mut(0).display.push(
+        IconVar {
+            vp: 0x1000,
+            position: Point::new(740, 439),
+            val_max: 2,
+            icon_min: 10100,
+            icon_max: 10102,
+            icon_lib: 48,
+            ..IconVar::default()
+        }
+        .into(),
+    );
+    editor.page_mut(2).display.push(
+        TextVar {
+            vp: 0xF000,
+            area: Area::new(726, 467, 1194, 613),
+            length: 2048,
+            ..TextVar::default()
+        }
+        .into(),
+    );
+    editor
+        .page_mut(12)
+        .touch
+        .push(Touch::new(Area::sized(0, 0, 50, 50), DataInput::default()));
+    for controls in [every_field(), editor] {
+        let files = controls.to_bytes().unwrap();
+        let read = Controls::from_bytes(&files.touch, &files.display).unwrap();
+        assert_eq!(read, controls);
+        assert_eq!(read.to_bytes().unwrap(), files);
+    }
+}
+
+#[test]
+fn reads_editor_output() {
+    let touch = hex!(
+        "0000 0670 0350 0706 03e6 ff00 ff00 fe05"
+        "feba 0000 0002 0000 0000 0000 0000 0000"
+        "ffff"
+    );
+    let controls = Controls::from_bytes(&touch, &no_displays()).unwrap();
+    assert_eq!(
+        controls.get(0).unwrap().touch,
+        [Touch::new(
+            Area::new(1648, 848, 1798, 998),
+            KeyCode::new(0xBA00, 2)
+        )]
+    );
+}
+
+#[test]
+fn keeps_controls_it_does_not_model() {
+    let mut controls = Controls::new();
+    let page = controls.page_mut(3);
+    // A "bit button" (FE 0D), 32 bytes.
+    let mut bit_button = vec![0; 18];
+    bit_button[..2].copy_from_slice(&[0xFE, 0x0D]);
+    bit_button[2] = 0xFE;
+    bit_button[3..7].copy_from_slice(&[0x12, 0x34, 0x00, 0x03]);
+    page.touch.push(Touch::new(
+        Area::sized(0, 0, 40, 40),
+        TouchAction::Unknown(bit_button),
+    ));
+    // An "RTC display" (5A 12), and a progress bar shown in a popup menu,
+    // which ProgressBar cannot say.
+    let mut rtc = [0; 32];
+    rtc[..6].copy_from_slice(&hex!("5a12 ffff 000d"));
+    page.display.push(Display::Unknown(rtc));
+    let mut bar = [0; 32];
+    bar[..6].copy_from_slice(&hex!("5f23 ffff 000d"));
+    page.display.push(Display::Unknown(bar));
+
+    let files = controls.to_bytes().unwrap();
+    let read = Controls::from_bytes(&files.touch, &files.display).unwrap();
+    assert_eq!(read, controls);
+    assert_eq!(read.to_bytes().unwrap(), files);
+
+    // A data input whose keyboard comes from the editor's "keyboard
+    // configuration" (0F) has no Keyboard to say so.
+    let mut input = Controls::new();
+    input
+        .page_mut(1)
+        .touch
+        .push(Touch::new(Area::sized(0, 0, 10, 10), DataInput::default()));
+    let mut touch = input.to_bytes().unwrap().touch;
+    touch[33] = 0x0F;
+    let read = Controls::from_bytes(&touch, &no_displays()).unwrap();
+    let touch_read = &read.get(1).unwrap().touch[0];
+    assert_matches!(&touch_read.action, TouchAction::Unknown(rest) if rest.len() == 50);
+    assert_eq!(read.to_bytes().unwrap().touch, touch);
+}
+
+#[test]
+fn keeps_only_the_highest_page_without_controls() {
+    let mut controls = Controls::new();
+    controls.page_mut(3);
+    controls.page_mut(7).display.push(icon(1));
+    controls.page_mut(40);
+    let files = controls.to_bytes().unwrap();
+    let read = Controls::from_bytes(&files.touch, &files.display).unwrap();
+    assert_eq!(read.iter().map(|(id, _)| id).collect::<Vec<_>>(), [7, 40]);
+    assert_eq!(read.to_bytes().unwrap(), files);
+}
+
+#[test]
+fn rejects_files_it_cannot_read() {
+    let empty = Controls::new().to_bytes().unwrap();
+    assert_matches!(
+        Controls::from_bytes(&empty.touch, b"\x14DGUS_2\x10"),
+        Err(Error::NotDisplayFile)
+    );
+    assert_matches!(
+        Controls::from_bytes(&empty.touch, &[0; 0x4020]),
+        Err(Error::NotDisplayFile)
+    );
+    // Page 5 claims a record past the end.
+    let mut display = empty.display.clone();
+    display[16 + 4 * 5..][..4].copy_from_slice(&hex!("01 ffffff"));
+    assert_matches!(
+        Controls::from_bytes(&empty.touch, &display),
+        Err(Error::PageTable { page: 5 })
+    );
+
+    let mut controls = Controls::new();
+    controls
+        .page_mut(0)
+        .touch
+        .push(Touch::new(Area::default(), KeyCode::new(1, 1)));
+    let touch = controls.to_bytes().unwrap().touch;
+    assert_matches!(
+        Controls::from_bytes(&touch[..touch.len() - 2], &empty.display),
+        Err(Error::TouchFileEnd)
+    );
+    // A basic touch is one unit; here a unit starting with FE follows it.
+    let basic = hex!(
+        "0000 0000 0000 0000 0000 ff00 ff00 0031"
+        "fe00 0000 0000 0000 0000 0000 0000 0000"
+        "ffff"
+    );
+    assert_matches!(
+        Controls::from_bytes(&basic, &empty.display),
+        Err(Error::TouchRecord { offset: 0 })
+    );
+
+    for rest in [vec![0x00, 0x05], vec![0xFE, 0x05, 0x00], vec![0xFE; 66]] {
+        let mut controls = Controls::new();
+        controls
+            .page_mut(2)
+            .touch
+            .push(Touch::new(Area::default(), TouchAction::Unknown(rest)));
+        assert_matches!(
+            controls.to_bytes(),
+            Err(Error::UnknownTouch { page: 2, index: 0 })
+        );
+    }
 }

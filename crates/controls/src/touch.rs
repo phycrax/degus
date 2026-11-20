@@ -1,9 +1,9 @@
 use std::ops::RangeInclusive;
 
-use num_enum::IntoPrimitive;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use crate::error::{Error, Result};
-use crate::geom::{Area, Point, put_i32, put_u16};
+use crate::geom::{Area, Point, get_i32, get_u16, put_i32, put_u16};
 
 /// Page fields use `FF 00` for "no page".
 const NO_PAGE: u16 = 0xFF00;
@@ -12,8 +12,10 @@ const UPLOAD: u8 = 0xFE;
 const NO_UPLOAD: u8 = 0xFD;
 /// Records are runs of 16-byte units; every unit after the first starts
 /// with `FE`.
-const UNIT_LEN: usize = 16;
-const CONTINUATION: u8 = 0xFE;
+pub(crate) const UNIT_LEN: usize = 16;
+pub(crate) const CONTINUATION: u8 = 0xFE;
+/// Where a record's control code is.
+const CODE_AT: usize = 14;
 
 /// Control types and record lengths. Basic touch has no type byte.
 const BASIC_LEN: usize = 16;
@@ -61,6 +63,7 @@ impl Touch {
 
 /// What a touch control does. Only the controls used so far are supported.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TouchAction {
     /// "Basic touch": a 16-byte record without VP. Pressing it sends this
     /// key code to the data input being edited, so keyboards are made of
@@ -72,6 +75,12 @@ pub enum TouchAction {
     KeyCode(KeyCode),
     /// "Data input" (`FE 00`): types a number into a VP on a keyboard.
     DataInput(DataInput),
+    /// A record read from a file that the types above do not model: a
+    /// control of another type, or one whose settings they cannot hold.
+    /// Holds the record from its control code (byte 14) on, which is
+    /// written back as it is: `FE` or `FD`, the type, then the rest of the
+    /// record's 16-byte units, each after the first starting with `FE`.
+    Unknown(Vec<u8>),
 }
 
 impl From<KeyCode> for TouchAction {
@@ -92,6 +101,7 @@ impl TouchAction {
             Self::Basic(_) => BASIC_LEN,
             Self::KeyCode(_) => KEY_CODE_LEN,
             Self::DataInput(_) => DATA_INPUT_LEN,
+            Self::Unknown(rest) => CODE_AT + rest.len(),
         }
     }
 }
@@ -138,6 +148,16 @@ pub enum KeyTarget {
 }
 
 impl KeyTarget {
+    fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(Self::Word),
+            1 => Some(Self::HighByte),
+            2 => Some(Self::LowByte),
+            0x10..=0x1F => Some(Self::Bit(code - 0x10)),
+            _ => None,
+        }
+    }
+
     fn code(self, page: u16, index: usize) -> Result<u8> {
         match self {
             Self::Word => Ok(0),
@@ -212,7 +232,7 @@ impl Default for DataInput {
 }
 
 /// How a data input writes its VP.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
 pub enum InputDataType {
     /// Signed 16-bit.
@@ -231,7 +251,7 @@ pub enum InputDataType {
 }
 
 /// Colour of a data input's cursor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, IntoPrimitive, TryFromPrimitive)]
 #[repr(u8)]
 pub enum CursorColor {
     #[default]
@@ -267,10 +287,10 @@ impl Touch {
                 if matches!(code.to_be_bytes()[0], UPLOAD | NO_UPLOAD) {
                     return Err(Error::BasicKey { page, index, code });
                 }
-                put_u16(&mut r, 14, code);
+                put_u16(&mut r, CODE_AT, code);
             }
             TouchAction::KeyCode(key) => {
-                r[14] = prefix(key.upload);
+                r[CODE_AT] = prefix(key.upload);
                 r[15] = KEY_CODE;
                 put_u16(&mut r, 17, key.vp);
                 r[19] = key.target.code(page, index)?;
@@ -278,6 +298,19 @@ impl Touch {
                 r[22] = key.hold_time;
             }
             TouchAction::DataInput(input) => input.write(&mut r),
+            TouchAction::Unknown(rest) => {
+                let len = CODE_AT + rest.len();
+                let well_formed = len.is_multiple_of(UNIT_LEN)
+                    && len <= MAX_LEN
+                    && matches!(rest.first(), Some(&(UPLOAD | NO_UPLOAD)))
+                    && (UNIT_LEN..len)
+                        .step_by(UNIT_LEN)
+                        .all(|unit| rest[unit - CODE_AT] == CONTINUATION);
+                if !well_formed {
+                    return Err(Error::UnknownTouch { page, index });
+                }
+                r[CODE_AT..len].copy_from_slice(rest);
+            }
         }
         let len = self.action.record_len();
         for unit in (UNIT_LEN..len).step_by(UNIT_LEN) {
@@ -288,10 +321,86 @@ impl Touch {
     }
 }
 
+impl Touch {
+    /// The page and the control a record holds. The action is
+    /// [`TouchAction::Unknown`] unless one of the other types holds every
+    /// setting. `None` for a record that is not a touch control.
+    pub(crate) fn decode(r: &[u8]) -> Option<(u16, Touch)> {
+        let page_field = |at| Some(get_u16(r, at)).filter(|&page| page != NO_PAGE);
+        let action = match r[CODE_AT] {
+            UPLOAD | NO_UPLOAD => {
+                let known = match (r[CODE_AT + 1], r.len()) {
+                    (KEY_CODE, KEY_CODE_LEN) => KeyCode::decode(r).map(TouchAction::KeyCode),
+                    (DATA_INPUT, DATA_INPUT_LEN) => {
+                        DataInput::decode(r).map(TouchAction::DataInput)
+                    }
+                    _ => None,
+                };
+                known.unwrap_or_else(|| TouchAction::Unknown(r[CODE_AT..].to_vec()))
+            }
+            _ if r.len() == BASIC_LEN => TouchAction::Basic(get_u16(r, CODE_AT)),
+            _ => return None,
+        };
+        let touch = Touch {
+            area: Area::read(r, 2),
+            next_page: page_field(10),
+            pressed_page: page_field(12),
+            action,
+        };
+        Some((get_u16(r, 0), touch))
+    }
+}
+
+impl KeyCode {
+    fn decode(r: &[u8]) -> Option<Self> {
+        Some(Self {
+            vp: get_u16(r, 17),
+            target: KeyTarget::from_code(r[19])?,
+            value: get_u16(r, 20),
+            hold_time: r[22],
+            upload: r[CODE_AT] == UPLOAD,
+        })
+    }
+}
+
 impl DataInput {
+    fn decode(r: &[u8]) -> Option<Self> {
+        let keyboard = match r[33] {
+            KEYBOARD_ON_PAGE => Keyboard::OnPage,
+            KEYBOARD_PAGE => Keyboard::Page {
+                page: get_u16(r, 34),
+                area: Area::read(r, 36),
+                position: Point::read(r, 44),
+            },
+            _ => return None,
+        };
+        Some(Self {
+            vp: get_u16(r, 17),
+            data_type: InputDataType::try_from(r[19]).ok()?,
+            integer_digits: r[20],
+            decimal_digits: r[21],
+            position: Point::read(r, 22),
+            color: get_u16(r, 26),
+            font: r[28],
+            font_size: r[29],
+            cursor_color: CursorColor::try_from(r[30]).ok()?,
+            masked: match r[31] {
+                MASKED => true,
+                UNMASKED => false,
+                _ => return None,
+            },
+            keyboard,
+            limits: (r[49] == LIMITS_ON).then(|| get_i32(r, 50)..=get_i32(r, 54)),
+            load_vp: (r[58] == LOAD_ON).then(|| get_u16(r, 59)),
+            load_value: get_u16(r, 61),
+            keyboard_transparency: r[63],
+            upload: r[CODE_AT] == UPLOAD,
+        })
+    }
+
     /// Writes bytes 14 and up of the record, except the unit markers.
     fn write(&self, r: &mut [u8]) {
-        r[14] = prefix(self.upload);
+        r[CODE_AT] = prefix(self.upload);
         r[15] = DATA_INPUT;
         put_u16(r, 17, self.vp);
         r[19] = self.data_type.into();

@@ -14,6 +14,10 @@ impl Point {
         put_u16(record, at, self.x);
         put_u16(record, at + 2, self.y);
     }
+
+    pub(crate) fn read(record: &[u8], at: usize) -> Self {
+        Self::new(get_u16(record, at), get_u16(record, at + 2))
+    }
 }
 
 /// A screen rectangle in pixels. Like the DGUS editor, `right` and `bottom`
@@ -49,6 +53,11 @@ impl Area {
         Point::new(self.left, self.top).write(record, at);
         Point::new(self.right, self.bottom).write(record, at + 4);
     }
+
+    pub(crate) fn read(record: &[u8], at: usize) -> Self {
+        let (start, end) = (Point::read(record, at), Point::read(record, at + 4));
+        Self::new(start.x, start.y, end.x, end.y)
+    }
 }
 
 pub(crate) fn put_u16(record: &mut [u8], at: usize, value: u16) {
@@ -57,4 +66,12 @@ pub(crate) fn put_u16(record: &mut [u8], at: usize, value: u16) {
 
 pub(crate) fn put_i32(record: &mut [u8], at: usize, value: i32) {
     record[at..at + 4].copy_from_slice(&value.to_be_bytes());
+}
+
+pub(crate) fn get_u16(record: &[u8], at: usize) -> u16 {
+    u16::from_be_bytes([record[at], record[at + 1]])
+}
+
+pub(crate) fn get_i32(record: &[u8], at: usize) -> i32 {
+    i32::from_be_bytes([record[at], record[at + 1], record[at + 2], record[at + 3]])
 }

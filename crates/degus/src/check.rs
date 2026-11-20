@@ -465,6 +465,8 @@ impl<'a> Checker<'a> {
                 }
                 self.area(at, "area", bar.area);
             }
+            // Records read from files that the types do not model.
+            _ => {}
         }
     }
 

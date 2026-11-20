@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use crate::display::{Display, RECORD_LEN};
 use crate::error::{Error, Result};
-use crate::touch::Touch;
+use crate::geom::get_u16;
+use crate::touch::{CONTINUATION, Touch, UNIT_LEN};
 
 /// Name the DGUS editor gives the touch configuration file.
 pub const TOUCH_FILE_NAME: &str = "13TouchFile.bin";
@@ -86,6 +87,66 @@ impl Controls {
 
     pub fn is_empty(&self) -> bool {
         self.pages.is_empty()
+    }
+
+    /// Reads files 13 and 14.
+    ///
+    /// Records the types here do not model are kept as
+    /// [`TouchAction::Unknown`](crate::TouchAction::Unknown) and
+    /// [`Display::Unknown`]. Of the pages without controls, only the
+    /// highest is kept: the display file records only its ID.
+    pub fn from_bytes(touch: &[u8], display: &[u8]) -> Result<Controls> {
+        let mut controls = Controls::new();
+        controls.read_display_file(display)?;
+        controls.read_touch_file(touch)?;
+        Ok(controls)
+    }
+
+    /// Records follow each other up to `FF FF`; units starting with `FE`
+    /// continue a record.
+    fn read_touch_file(&mut self, file: &[u8]) -> Result<()> {
+        let mut at = 0;
+        loop {
+            let rest = &file[at..];
+            if rest.starts_with(&TOUCH_END) {
+                return Ok(());
+            }
+            let mut len = UNIT_LEN;
+            while rest.get(len) == Some(&CONTINUATION) {
+                len += UNIT_LEN;
+            }
+            let record = rest.get(..len).ok_or(Error::TouchFileEnd)?;
+            let (page, touch) = Touch::decode(record).ok_or(Error::TouchRecord { offset: at })?;
+            self.page_mut(page).touch.push(touch);
+            at += len;
+        }
+    }
+
+    fn read_display_file(&mut self, file: &[u8]) -> Result<()> {
+        if file.len() < RECORDS_START || file[..DISPLAY_MAGIC.len()] != DISPLAY_MAGIC {
+            return Err(Error::NotDisplayFile);
+        }
+        // A highest page of 0 is also what a file without pages records.
+        let max_page = get_u16(file, 8);
+        if max_page > 0 {
+            self.page_mut(max_page);
+        }
+        for page in 0..MAX_PAGES {
+            let entry = &file[HEADER_LEN + ENTRY_LEN * usize::from(page)..][..ENTRY_LEN];
+            let count = usize::from(entry[0]);
+            if count == 0 {
+                continue;
+            }
+            let offset = u32::from_be_bytes([0, entry[1], entry[2], entry[3]]) as usize;
+            let records = file
+                .get(offset..offset + RECORD_LEN * count)
+                .ok_or(Error::PageTable { page })?;
+            let display = &mut self.page_mut(page).display;
+            for record in records.as_chunks::<RECORD_LEN>().0 {
+                display.push(Display::decode(record));
+            }
+        }
+        Ok(())
     }
 
     /// Writes files 13 and 14.
