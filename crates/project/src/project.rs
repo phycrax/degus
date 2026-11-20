@@ -17,11 +17,9 @@ pub struct Project {
     pub controls: Vec<ControlsEntry>,
 }
 
-/// A controls file and the page it belongs to.
+/// A controls file of the project.
 #[derive(Debug, Clone)]
 pub struct ControlsEntry {
-    /// Page ID.
-    pub id: u16,
     /// Path relative to the project root.
     pub path: PathBuf,
     pub file: ControlsFile,
@@ -40,11 +38,10 @@ impl Project {
         let controls = config
             .controls
             .iter()
-            .map(|spec| {
+            .map(|path| {
                 Ok(ControlsEntry {
-                    id: spec.id,
-                    path: spec.path.clone(),
-                    file: read_toml(&root.join(&spec.path))?,
+                    path: path.clone(),
+                    file: read_toml(&root.join(path))?,
                 })
             })
             .collect::<Result<_>>()?;
@@ -76,8 +73,20 @@ impl Project {
     pub fn output_dir(&self) -> PathBuf {
         self.resolve(&self.config.output)
     }
+
+    /// The control named `name`, with the index of its file in
+    /// [`Project::controls`]. A name defined in several files is the first
+    /// one's; the check reports the others.
+    pub fn control(&self, name: &str) -> Option<(usize, &Control)> {
+        self.controls
+            .iter()
+            .enumerate()
+            .find_map(|(entry, file)| file.file.controls.get(name).map(|c| (entry, c)))
+    }
+
     /// The controls of every page, ready for `degus-controls` to build.
-    /// Entries sharing a page ID are merged; the check reports them.
+    /// Pages listed twice are merged, and names no file defines are left
+    /// out; the check reports both.
     pub fn to_controls(&self) -> Controls {
         self.to_controls_with_sources().0
     }
@@ -86,14 +95,16 @@ impl Project {
     pub fn to_controls_with_sources(&self) -> (Controls, SourceMap) {
         let mut controls = Controls::new();
         let mut sources = SourceMap::default();
-        for (entry_index, entry) in self.controls.iter().enumerate() {
-            let target = controls.page_mut(entry.id);
-            let page_sources = sources.pages.entry(entry.id).or_default();
-            for (index, control) in entry.file.controls.iter().enumerate() {
+        for page in &self.config.pages {
+            let target = controls.page_mut(page.id);
+            let page_sources = sources.pages.entry(page.id).or_default();
+            for name in &page.controls {
+                let Some((entry, control)) = self.control(name) else {
+                    continue;
+                };
                 let source = SourceRef {
-                    entry: entry_index,
-                    index,
-                    name: control.name().map(str::to_owned),
+                    entry,
+                    name: name.clone(),
                 };
                 if control.is_touch() {
                     page_sources.touch.push(source);
@@ -141,12 +152,10 @@ pub struct PageSources {
 /// A control in a controls file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceRef {
-    /// Index into [`Project::controls`].
+    /// Index into [`Project::controls`] of the file defining it.
     pub entry: usize,
-    /// Position of the control in its file, from 0.
-    pub index: usize,
-    /// The control's `name`, if it has one.
-    pub name: Option<String>,
+    /// The control's name.
+    pub name: String,
 }
 
 fn read_toml<T: DeserializeOwned>(path: &Path) -> Result<T> {

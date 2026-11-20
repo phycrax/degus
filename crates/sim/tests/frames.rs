@@ -26,7 +26,8 @@ fn project(name: &str, config: &str) -> PathBuf {
         format!(
             r#"
 screen = {{ w = 100, h = 100 }}
-controls = [{{ id = 0, path = "home.toml" }}]
+controls = ["home.toml"]
+pages = [{{ id = 0, controls = ["button"] }}]
 
 [config]
 background_icl = 32
@@ -41,7 +42,7 @@ images = [{{ id = 0, path = "home.png" }}]
     write(
         dir.join("home.toml"),
         r#"
-[[control]]
+[control.button]
 type = "button"
 area = { x = 0, y = 0, w = 50, h = 50 }
 vp = 0x1000

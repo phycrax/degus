@@ -23,13 +23,14 @@ shows up in a diff.
 
 ```toml
 # A button that writes 1 to VP 0x1000, and an icon that shows its value.
-[[control]]
+# Pages list them by name: pages = [{ id = 0, controls = ["fan", "fan_on"] }]
+[control.fan_on]
 type = "button"
 area = { x = 300, y = 200, w = 120, h = 60 }
 vp = 0x1000
 value = 1
 
-[[control]]
+[control.fan]
 type = "icon"
 vp = 0x1000
 position = { x = 100, y = 200 }

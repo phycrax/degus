@@ -15,9 +15,10 @@ const YELLOW: Rgb<u8> = Rgb([255, 255, 0]);
 
 const PROJECT: &str = r#"
 screen = { w = 200, h = 120 }
-controls = [
-    { id = 0, path = "controls/home.toml" },
-    { id = 3, path = "controls/keyboard.toml" },
+controls = ["controls/home.toml", "controls/keyboard.toml"]
+pages = [
+    { id = 0, controls = ["lamp", "on", "off", "next", "reading", "level", "message", "setpoint"] },
+    { id = 3, controls = ["key_1", "key_2", "key_point", "key_enter", "key_cancel", "key_5"] },
 ]
 
 [config]
@@ -41,9 +42,8 @@ images = [
 "#;
 
 const HOME: &str = r##"
-[[control]]
+[control.lamp]
 type = "icon"
-name = "lamp"
 vp = 0x1000
 position = { x = 10, y = 10 }
 icon_lib = 40
@@ -51,32 +51,29 @@ val_max = 1
 icon_min = 0
 icon_max = 1
 
-[[control]]
+[control.on]
 type = "button"
-name = "on"
 area = { x = 100, y = 10, w = 40, h = 30 }
 vp = 0x1000
 value = 1
 pressed_page = 2
 
-[[control]]
+[control.off]
 type = "button"
-name = "off"
 area = { x = 150, y = 10, w = 40, h = 30 }
 vp = 0x1000
 value = 0
 upload = false
 
-[[control]]
+[control.next]
 type = "button"
-name = "next"
 area = { x = 100, y = 50, w = 40, h = 20 }
 vp = 0x1002
 value = 5
 hold_time = 5
 next_page = 1
 
-[[control]]
+[control.reading]
 type = "data"
 vp = 0x1001
 position = { x = 10, y = 50 }
@@ -85,7 +82,7 @@ font_size = 8
 integer_digits = 3
 decimal_digits = 1
 
-[[control]]
+[control.level]
 type = "progress"
 vp = 0x1003
 area = { x = 10, y = 100, w = 100, h = 10 }
@@ -93,7 +90,7 @@ val_max = 100
 bar_color = "#FFFF00"
 rate_vp = 0x1004
 
-[[control]]
+[control.message]
 type = "text"
 vp = 0x2000
 area = { x = 10, y = 30, w = 80, h = 20 }
@@ -102,9 +99,8 @@ font_width = 8
 font_height = 16
 color = "#FFFFFF"
 
-[[control]]
+[control.setpoint]
 type = "input"
-name = "setpoint"
 area = { x = 150, y = 50, w = 40, h = 20 }
 vp = 0x1010
 position = { x = 190, y = 50 }
@@ -117,32 +113,32 @@ keyboard = { page = 3, area = { x = 0, y = 0, w = 100, h = 40 }, position = { x 
 /// Keys at 25 × 20: `1 2 . enter` on the first row, `cancel 5` on the
 /// second.
 const KEYBOARD: &str = r#"
-[[control]]
+[control.key_1]
 type = "key"
 area = { x = 0, y = 0, w = 25, h = 20 }
 code = 0x31
 
-[[control]]
+[control.key_2]
 type = "key"
 area = { x = 25, y = 0, w = 25, h = 20 }
 code = 0x32
 
-[[control]]
+[control.key_point]
 type = "key"
 area = { x = 50, y = 0, w = 25, h = 20 }
 code = 0x2E
 
-[[control]]
+[control.key_enter]
 type = "key"
 area = { x = 75, y = 0, w = 25, h = 20 }
 code = 0xF1
 
-[[control]]
+[control.key_cancel]
 type = "key"
 area = { x = 0, y = 20, w = 25, h = 20 }
 code = 0xF0
 
-[[control]]
+[control.key_5]
 type = "key"
 area = { x = 25, y = 20, w = 25, h = 20 }
 code = 0x35
@@ -226,11 +222,23 @@ fn loads_the_pages_and_draws_the_start_page() {
 #[test]
 fn refuses_a_project_the_build_would_refuse() {
     let dir = project("broken");
+    // The "on" button runs past the screen's right edge.
     write(
         dir.join("controls/home.toml"),
-        "[[control]]\ntype = \"button\"\narea = { x = 190, y = 0, w = 40, h = 10 }\nvp = 0x1000\nvalue = 1\n",
+        HOME.replace(
+            "area = { x = 100, y = 10, w = 40, h = 30 }",
+            "area = { x = 190, y = 0, w = 40, h = 10 }",
+        ),
     );
-    assert!(matches!(Sim::load(&dir), Err(LoadError::Check(_))));
+    let Err(LoadError::Check(diagnostics)) = Sim::load(&dir) else {
+        panic!("the check should refuse the project");
+    };
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.to_string().contains("controls/home.toml: on: area")),
+        "{diagnostics:#?}"
+    );
 }
 
 #[test]
@@ -406,8 +414,8 @@ fn labels_the_overlay_with_the_controls_source() {
     let sim = Sim::load(project("overlay")).unwrap();
     let overlay = sim.overlay();
     let labels: Vec<_> = overlay.iter().map(|item| item.label.as_str()).collect();
-    assert!(labels.contains(&"controls/home.toml: control 1 (\"lamp\")"));
-    assert!(labels.contains(&"controls/home.toml: control 8 (\"setpoint\")"));
+    assert!(labels.contains(&"controls/home.toml: lamp"));
+    assert!(labels.contains(&"controls/home.toml: setpoint"));
     let lamp = overlay.iter().find(|i| i.label.contains("lamp")).unwrap();
     assert_eq!((lamp.rect.w, lamp.rect.h), (20, 20));
     assert!(!lamp.touch);

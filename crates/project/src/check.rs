@@ -1,5 +1,7 @@
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::path::Path;
 
 use degus_config::FILE_NAME as CONFIG_FILE_NAME;
 use degus_controls::{
@@ -35,7 +37,7 @@ pub enum Severity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub severity: Severity,
-    /// Where: a file, and for controls the control's number and name.
+    /// Where: a file, and for controls the control's name.
     pub location: String,
     pub message: String,
 }
@@ -191,22 +193,21 @@ impl Project {
             screen: config.screen,
             icl_ids,
             backgrounds,
-            pages: self.controls.iter().map(|entry| entry.id).collect(),
-            key_pages: self
-                .controls
+            pages: config.pages.iter().map(|page| page.id).collect(),
+            key_pages: config
+                .pages
                 .iter()
-                .filter(|entry| {
-                    entry
-                        .file
-                        .controls
+                .filter(|page| {
+                    page.controls
                         .iter()
-                        .any(|c| matches!(c, Control::Key(_)))
+                        .any(|name| matches!(self.control(name), Some((_, Control::Key(_)))))
                 })
-                .map(|entry| entry.id)
+                .map(|page| page.id)
                 .collect(),
             icons: &icons,
         };
         self.check_controls(&mut a, &context);
+        self.check_pages(&mut a, &context);
         a
     }
 
@@ -281,18 +282,69 @@ impl Project {
         }
     }
 
+    /// Checks each control once, however many pages list it, and the names
+    /// across the files.
     fn check_controls(&self, a: &mut Analysis, context: &Context) {
         let location = format!("{}: controls", context.project_file);
-        let mut listed = BTreeSet::new();
-        let shared: BTreeSet<_> = self
-            .controls
+        let listed: BTreeSet<&str> = self
+            .config
+            .pages
             .iter()
-            .filter(|entry| !listed.insert(&entry.path))
-            .map(|entry| &entry.path)
+            .flat_map(|page| page.controls.iter().map(String::as_str))
             .collect();
-        let mut seen = BTreeSet::new();
+        let mut paths = BTreeSet::new();
+        let mut defined: BTreeMap<&str, &Path> = BTreeMap::new();
         for entry in &self.controls {
-            let id = entry.id;
+            if !paths.insert(&entry.path) {
+                a.error(
+                    &location,
+                    format!("{} is listed twice", entry.path.display()),
+                );
+                continue;
+            }
+            let file = entry.path.display().to_string();
+            for (name, control) in &entry.file.controls {
+                let location = format!("{file}: {name}");
+                if !is_name(name) {
+                    a.error(
+                        &location,
+                        format!(
+                            "{name:?} is not a name: use lowercase letters, digits and _, \
+                             starting with a letter"
+                        ),
+                    );
+                }
+                match defined.entry(name) {
+                    Entry::Occupied(first) => a.error(
+                        &location,
+                        format!("{name} is also defined in {}", first.get().display()),
+                    ),
+                    Entry::Vacant(slot) => {
+                        slot.insert(&entry.path);
+                    }
+                }
+                if !listed.contains(name.as_str()) {
+                    a.warning(&location, "no page lists it");
+                }
+                match control {
+                    Control::Button(button) => check_button(a, &location, button, context),
+                    Control::Key(key) => check_key(a, &location, key, context),
+                    Control::Input(input) => check_input(a, &location, input, context),
+                    Control::Icon(icon) => check_icon(a, &location, icon, context),
+                    Control::Data(data) => check_data(a, &location, data, context),
+                    Control::Text(text) => check_text(a, &location, text, context),
+                    Control::Progress(bar) => check_progress(a, &location, bar, context),
+                }
+            }
+        }
+    }
+
+    /// Checks each page and what depends on the page its controls are on.
+    fn check_pages(&self, a: &mut Analysis, context: &Context) {
+        let location = format!("{}: pages", context.project_file);
+        let mut seen = BTreeSet::new();
+        for page in &self.config.pages {
+            let id = page.id;
             if id >= MAX_PAGES {
                 a.error(&location, format!("page ID {id} is not below {MAX_PAGES}"));
             }
@@ -308,49 +360,59 @@ impl Project {
                 );
             }
 
-            // A file listed for several pages is checked for each of them.
-            let mut file = entry.path.display().to_string();
-            if shared.contains(&entry.path) {
-                file.push_str(&format!(" (page {id})"));
+            let mut names = BTreeSet::new();
+            let mut displays = 0;
+            for name in &page.controls {
+                if !names.insert(name) {
+                    a.warning(&location, format!("page {id} lists {name} twice"));
+                }
+                let Some((entry, control)) = self.control(name) else {
+                    a.error(
+                        &location,
+                        format!("page {id} lists {name}, which no controls file defines"),
+                    );
+                    continue;
+                };
+                if !control.is_touch() {
+                    displays += 1;
+                }
+                // Without a keyboard page, the keys are on the input's page.
+                if let Control::Input(input) = control
+                    && input.keyboard.is_none()
+                    && !context.key_pages.contains(&id)
+                {
+                    let file = self.controls[entry].path.display();
+                    a.warning(
+                        format!("{file}: {name} (page {id})"),
+                        format!("keyboard page {id} has no key controls"),
+                    );
+                }
             }
-            let controls = &entry.file.controls;
-            let displays = controls.iter().filter(|c| !c.is_touch()).count();
             if displays > MAX_DISPLAYS_PER_PAGE {
                 a.error(
-                    &file,
+                    &location,
                     format!(
-                        "{displays} display controls; a page holds at most {MAX_DISPLAYS_PER_PAGE}"
+                        "page {id} has {displays} display controls; a page holds at most \
+                         {MAX_DISPLAYS_PER_PAGE}"
                     ),
                 );
             }
-            for (index, control) in controls.iter().enumerate() {
-                let location = control_location(&file, index, control);
-                match control {
-                    Control::Button(button) => check_button(a, &location, button, context),
-                    Control::Key(key) => check_key(a, &location, key, context),
-                    Control::Input(input) => check_input(a, &location, input, id, context),
-                    Control::Icon(icon) => check_icon(a, &location, icon, context),
-                    Control::Data(data) => check_data(a, &location, data, context),
-                    Control::Text(text) => check_text(a, &location, text, context),
-                    Control::Progress(bar) => check_progress(a, &location, bar, context),
-                }
-            }
         }
     }
+}
+
+/// Whether `name` is lowercase letters, digits and `_`, starting with a
+/// letter, so code can use it as an identifier.
+fn is_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
 /// The display reads any `T5LCFG*.CFG` as its configuration.
 pub(crate) fn is_config_file(name: &str) -> bool {
     let name = name.to_ascii_uppercase();
     name.starts_with("T5LCFG") && name.ends_with(".CFG")
-}
-
-fn control_location(file: &str, index: usize, control: &Control) -> String {
-    let mut location = format!("{file}: control {}", index + 1);
-    if let Some(name) = control.name() {
-        location.push_str(&format!(" ({name:?})"));
-    }
-    location
 }
 
 fn check_button(a: &mut Analysis, location: &str, button: &Button, context: &Context) {
@@ -374,7 +436,8 @@ fn check_key(a: &mut Analysis, location: &str, key: &Key, context: &Context) {
     check_touch_pages(a, location, key.next_page, key.pressed_page, context);
 }
 
-fn check_input(a: &mut Analysis, location: &str, input: &Input, page: u16, context: &Context) {
+/// The keys of an input without a keyboard page are checked with its pages.
+fn check_input(a: &mut Analysis, location: &str, input: &Input, context: &Context) {
     let screen = context.screen;
     check_rect(a, location, "area", input.area, screen);
     check_pos(a, location, input.position, screen);
@@ -386,30 +449,26 @@ fn check_input(a: &mut Analysis, location: &str, input: &Input, page: u16, conte
             format!("limits min {} is above max {}", limits.min, limits.max),
         );
     }
-    let keys = match input.keyboard {
-        None => page,
-        Some(keyboard) => {
-            check_rect(a, location, "keyboard area", keyboard.area, screen);
-            let (x, y) = (keyboard.position.x, keyboard.position.y);
-            let right = u32::from(x) + u32::from(keyboard.area.w);
-            let bottom = u32::from(y) + u32::from(keyboard.area.h);
-            if right > u32::from(screen.w) || bottom > u32::from(screen.h) {
-                a.error(
-                    location,
-                    format!(
-                        "keyboard drawn at ({x}, {y}) extends past the {}x{} screen",
-                        screen.w, screen.h
-                    ),
-                );
-            }
-            keyboard.page
+    if let Some(keyboard) = input.keyboard {
+        check_rect(a, location, "keyboard area", keyboard.area, screen);
+        let (x, y) = (keyboard.position.x, keyboard.position.y);
+        let right = u32::from(x) + u32::from(keyboard.area.w);
+        let bottom = u32::from(y) + u32::from(keyboard.area.h);
+        if right > u32::from(screen.w) || bottom > u32::from(screen.h) {
+            a.error(
+                location,
+                format!(
+                    "keyboard drawn at ({x}, {y}) extends past the {}x{} screen",
+                    screen.w, screen.h
+                ),
+            );
         }
-    };
-    if !context.key_pages.contains(&keys) {
-        a.warning(
-            location,
-            format!("keyboard page {keys} has no key controls"),
-        );
+        if !context.key_pages.contains(&keyboard.page) {
+            a.warning(
+                location,
+                format!("keyboard page {} has no key controls", keyboard.page),
+            );
+        }
     }
     check_touch_pages(a, location, input.next_page, input.pressed_page, context);
 }

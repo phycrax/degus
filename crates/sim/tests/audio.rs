@@ -8,7 +8,7 @@ use degus_sim::{Event, Runner, Sim, Sound};
 use image::{Rgb, RgbImage};
 
 const BUTTON: &str = r#"
-[[control]]
+[control.button]
 type = "button"
 area = { x = 0, y = 0, w = 50, h = 50 }
 vp = 0x1000
@@ -50,7 +50,8 @@ fn project(name: &str, config: &str) -> PathBuf {
         format!(
             r#"
 screen = {{ w = 100, h = 100 }}
-controls = [{{ id = 0, path = "home.toml" }}]
+controls = ["home.toml"]
+pages = [{{ id = 0, controls = ["button"] }}]
 
 [config]
 background_icl = 32

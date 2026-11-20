@@ -59,9 +59,10 @@ fn save_wav(path: impl AsRef<Path>) {
 const PROJECT: &str = r#"
 screen = { w = 800, h = 480 }
 copy = ["extra/readme.txt"]
-controls = [
-    { id = 0, path = "controls/main.toml" },
-    { id = 1, path = "controls/keyboard.toml" },
+controls = ["controls/main.toml", "controls/keyboard.toml"]
+pages = [
+    { id = 0, controls = ["power", "temperature", "message", "level", "power_switch", "setpoint"] },
+    { id = 1, controls = ["key_1"] },
 ]
 
 [config]
@@ -88,13 +89,15 @@ id = 60
 clips = [{ id = 1, path = "audio/beep.wav" }]
 "#;
 
-/// The last entry of `controls` in `PROJECT`, to add entries after.
-const LAST_CONTROLS: &str = "    { id = 1, path = \"controls/keyboard.toml\" },\n";
+/// The controls files in `PROJECT`, to list more.
+const CONTROLS: &str = "controls = [\"controls/main.toml\", \"controls/keyboard.toml\"]";
+
+/// The last entry of `pages` in `PROJECT`, to add pages after.
+const LAST_PAGE: &str = "    { id = 1, controls = [\"key_1\"] },\n";
 
 const MAIN_PAGE: &str = r##"
-[[control]]
+[control.power]
 type = "icon"
-name = "power"
 vp = 0x1000
 position = { x = 10, y = 20 }
 icon_lib = 48
@@ -103,7 +106,7 @@ val_max = 1
 icon_min = 10100
 icon_max = 10101
 
-[[control]]
+[control.temperature]
 type = "data"
 vp = 0x1010
 position = { x = 100, y = 20 }
@@ -115,7 +118,7 @@ decimal_digits = 1
 data_type = "u16"
 unit = "C"
 
-[[control]]
+[control.message]
 type = "text"
 vp = 0x2000
 sp = 0x5000
@@ -128,9 +131,8 @@ font_height = 32
 align = "right_to_left"
 vertical_align = "center"
 
-[[control]]
+[control.level]
 type = "progress"
-name = "level"
 vp = 0x1020
 area = { x = 10, y = 300, w = 400, h = 20 }
 val_max = 100
@@ -138,9 +140,8 @@ bar_color = "#00FF00"
 show_border = true
 rate_vp = 0x1021
 
-[[control]]
+[control.power_switch]
 type = "button"
-name = "power"
 area = { x = 10, y = 20, w = 64, h = 64 }
 vp = 0x1000
 target = { bit = 3 }
@@ -149,9 +150,8 @@ next_page = 1
 pressed_page = 1
 upload = false
 
-[[control]]
+[control.setpoint]
 type = "input"
-name = "setpoint"
 area = { x = 100, y = 100, w = 200, h = 40 }
 vp = 0x1030
 position = { x = 290, y = 108 }
@@ -165,7 +165,7 @@ limits = { min = 0, max = 1000 }
 "##;
 
 const KEYBOARD_PAGE: &str = r#"
-[[control]]
+[control.key_1]
 type = "key"
 area = { x = 0, y = 0, w = 100, h = 50 }
 code = 0x0031
@@ -357,36 +357,70 @@ fn builds_every_library_and_the_controls() {
 }
 
 #[test]
-fn maps_each_control_to_its_file_and_position() {
+fn maps_each_control_to_its_file_and_name() {
     let dir = sample_project("sources");
     let project = Project::load(&dir).unwrap();
     let (controls, sources) = project.to_controls_with_sources();
     assert_eq!(controls, project.to_controls());
 
-    let source = |entry, index, name: Option<&str>| SourceRef {
+    let source = |entry, name: &str| SourceRef {
         entry,
-        index,
-        name: name.map(str::to_owned),
+        name: name.to_owned(),
     };
-    // Touch and display controls are split, each keeping the file's order.
+    // Touch and display controls are split, each keeping the page's order.
     let main = sources.page(0).unwrap();
     assert_eq!(
         main.display,
         [
-            source(0, 0, Some("power")),
-            source(0, 1, None),
-            source(0, 2, None),
-            source(0, 3, Some("level")),
+            source(0, "power"),
+            source(0, "temperature"),
+            source(0, "message"),
+            source(0, "level"),
         ]
     );
     assert_eq!(
         main.touch,
-        [source(0, 4, Some("power")), source(0, 5, Some("setpoint"))]
+        [source(0, "power_switch"), source(0, "setpoint")]
     );
     let keyboard = sources.page(1).unwrap();
-    assert_eq!(keyboard.touch, [source(1, 0, None)]);
+    assert_eq!(keyboard.touch, [source(1, "key_1")]);
     assert!(keyboard.display.is_empty());
     assert_eq!(sources.page(2), None);
+}
+
+#[test]
+fn shares_controls_between_pages_in_each_pages_order() {
+    let dir = sample_project("shared");
+    write(
+        dir.join("project.toml"),
+        PROJECT.replace(
+            LAST_PAGE,
+            &format!(
+                "{LAST_PAGE}    {{ id = 2, controls = [\"level\", \"key_1\", \"power\"] }},\n"
+            ),
+        ),
+    );
+    let project = Project::load(&dir).unwrap();
+    let controls = project.to_controls();
+
+    // Page 2 draws the level bar under the power icon, as it lists them,
+    // while page 0 keeps its own order.
+    let main = controls.get(0).unwrap();
+    let third = controls.get(2).unwrap();
+    assert_eq!(
+        third.display,
+        [main.display[3].clone(), main.display[0].clone()]
+    );
+    assert_eq!(third.touch, controls.get(1).unwrap().touch);
+    assert_eq!(main.display.len(), 4);
+
+    // The shared controls are checked once, so nothing changes but the
+    // missing background of page 2.
+    let messages: Vec<String> = project.check().iter().map(ToString::to_string).collect();
+    assert_eq!(
+        messages,
+        ["warning: project.toml: pages: page 2 has no background image in 32.icl"]
+    );
 }
 
 #[test]
@@ -429,22 +463,28 @@ fn reports_build_problems_by_file_and_control() {
             .replace("id = 60", "id = 13")
             .replace("copy = [\"extra/readme.txt\"]", "copy = [\"missing.bin\"]")
             .replace(
-                LAST_CONTROLS,
+                CONTROLS,
+                "controls = [\"controls/main.toml\", \"controls/keyboard.toml\", \
+                 \"controls/bad.toml\", \"controls/other.toml\", \"controls/bad.toml\"]",
+            )
+            .replace(
+                LAST_PAGE,
                 &format!(
-                    "{LAST_CONTROLS}\
-                     {{ id = 2, path = \"controls/bad.toml\" }},\n\
-                     {{ id = 6, path = \"controls/bad.toml\" }},\n\
-                     {{ id = 1, path = \"controls/empty.toml\" }},\n\
-                     {{ id = 4092, path = \"controls/empty.toml\" }},\n"
+                    "{LAST_PAGE}\
+                     {{ id = 2, controls = [\"gauge\", \"wrong_lib\", \"wide_button\", \
+                     \"temperature_c\", \"empty_bar\", \"bad_limits\", \"far_keyboard\", \
+                     \"bad_key\", \"missing_icon\"] }},\n\
+                     {{ id = 6, controls = [\"gauge\", \"ghost\", \"gauge\", \"bad_limits\"] }},\n\
+                     {{ id = 1 }},\n\
+                     {{ id = 4092 }},\n"
                 ),
             ),
     );
     write(
         dir.join("controls/bad.toml"),
         r#"
-[[control]]
+[control.gauge]
 type = "icon"
-name = "gauge"
 vp = 0x3000
 position = { x = 900, y = 20 }
 icon_lib = 48
@@ -452,7 +492,7 @@ val_max = 3
 icon_min = 10100
 icon_max = 10103
 
-[[control]]
+[control.wrong_lib]
 type = "icon"
 vp = 0x3001
 position = { x = 0, y = 0 }
@@ -461,46 +501,46 @@ val_max = 0
 icon_min = 1
 icon_max = 1
 
-[[control]]
+[control.wide_button]
 type = "button"
 area = { x = 700, y = 400, w = 200, h = 50 }
 vp = 0x3002
 value = 1
 next_page = 7
 
-[[control]]
+[control.temperature_c]
 type = "data"
 vp = 0x3003
 position = { x = 0, y = 0 }
 unit = "°C"
 
-[[control]]
+[control.empty_bar]
 type = "progress"
 vp = 0x3004
 area = { x = 0, y = 0, w = 100, h = 0 }
 val_min = 10
 val_max = 10
 
-[[control]]
+[control.bad_limits]
 type = "input"
 vp = 0x3005
 area = { x = 0, y = 0, w = 100, h = 40 }
 position = { x = 90, y = 10 }
 limits = { min = 5, max = -5 }
 
-[[control]]
+[control.far_keyboard]
 type = "input"
 vp = 0x3006
 area = { x = 0, y = 50, w = 100, h = 40 }
 position = { x = 90, y = 60 }
 keyboard = { page = 0, area = { x = 0, y = 0, w = 300, h = 200 }, position = { x = 600, y = 100 } }
 
-[[control]]
+[control.bad_key]
 type = "key"
 area = { x = 0, y = 100, w = 50, h = 50 }
 code = 0xFE31
 
-[[control]]
+[control.missing_icon]
 type = "icon"
 vp = 0x3007
 position = { x = 0, y = 0 }
@@ -509,7 +549,26 @@ icon_min = 1
 icon_max = 2
 "#,
     );
-    write(dir.join("controls/empty.toml"), "");
+    write(
+        dir.join("controls/other.toml"),
+        r#"
+[control.gauge]
+type = "data"
+vp = 0x3100
+position = { x = 0, y = 0 }
+
+[control.spare]
+type = "data"
+vp = 0x3101
+position = { x = 0, y = 0 }
+
+[control.FanOn]
+type = "button"
+area = { x = 0, y = 0, w = 10, h = 10 }
+vp = 0x3102
+value = 1
+"#,
+    );
 
     let diagnostics = Project::load(&dir).unwrap().check();
     let messages: Vec<String> = diagnostics.iter().map(ToString::to_string).collect();
@@ -528,69 +587,108 @@ icon_max = 2
     expect(Severity::Error, "copy: missing.bin not found");
     expect(
         Severity::Error,
-        "control 1 (\"gauge\"): position (900, 20) is outside the 800x480 screen",
+        "controls/bad.toml: gauge: position (900, 20) is outside the 800x480 screen",
     );
     expect(
         Severity::Error,
-        "control 1 (\"gauge\"): 48.icl has no icon 10102, 10103",
+        "controls/bad.toml: gauge: 48.icl has no icon 10102, 10103",
     );
-    // bad.toml is listed for pages 2 and 6, so its messages name the page.
-    expect(
-        Severity::Error,
-        "controls/bad.toml (page 6): control 1 (\"gauge\"): 48.icl has no icon",
-    );
-    expect(
-        Severity::Error,
-        "control 2: icon_lib 49 is not an ICL declared in project.toml",
-    );
-    expect(
-        Severity::Error,
-        "control 3: area (700, 400) 200x50 extends past the 800x480 screen",
-    );
-    expect(
-        Severity::Warning,
-        "control 3: next_page 7 is not a page of this project",
-    );
-    expect(Severity::Error, "control 4: unit \"°C\" must be ASCII");
-    expect(Severity::Error, "control 5: area is empty");
-    expect(
-        Severity::Error,
-        "control 5: val_min 10 is not below val_max 10",
-    );
-    expect(Severity::Error, "control 6: limits min 5 is above max -5");
-    // Page 2's key is invalid, but it still counts as a keyboard.
-    assert!(
-        !messages.iter().any(|m| m.contains("control 6: keyboard")),
+    // Pages 2 and 6 list gauge, but it is checked once.
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.contains("gauge: 48.icl has no icon"))
+            .count(),
+        1,
         "{messages:#?}"
     );
     expect(
         Severity::Error,
-        "control 7: keyboard drawn at (600, 100) extends past the 800x480 screen",
-    );
-    expect(
-        Severity::Warning,
-        "control 7: keyboard page 0 has no key controls",
+        "controls/bad.toml: wrong_lib: icon_lib 49 is not an ICL declared in project.toml",
     );
     expect(
         Severity::Error,
-        "control 8: code 0xFE31 must not start with FE or FD",
+        "wide_button: area (700, 400) 200x50 extends past the 800x480 screen",
+    );
+    expect(
+        Severity::Warning,
+        "wide_button: next_page 7 is not a page of this project",
+    );
+    expect(Severity::Error, "temperature_c: unit \"°C\" must be ASCII");
+    expect(Severity::Error, "empty_bar: area is empty");
+    expect(
+        Severity::Error,
+        "empty_bar: val_min 10 is not below val_max 10",
+    );
+    expect(Severity::Error, "bad_limits: limits min 5 is above max -5");
+    // Page 2's key is invalid, but it still counts as a keyboard; page 6
+    // has none for the input to use.
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m.contains("bad_limits (page 2): keyboard")),
+        "{messages:#?}"
+    );
+    expect(
+        Severity::Warning,
+        "controls/bad.toml: bad_limits (page 6): keyboard page 6 has no key controls",
+    );
+    expect(
+        Severity::Error,
+        "far_keyboard: keyboard drawn at (600, 100) extends past the 800x480 screen",
+    );
+    expect(
+        Severity::Warning,
+        "far_keyboard: keyboard page 0 has no key controls",
+    );
+    expect(
+        Severity::Error,
+        "bad_key: code 0xFE31 must not start with FE or FD",
     );
     // Without icon_lib, the icons come from the background ICL.
     expect(
         Severity::Error,
-        "control 9: 32.icl (the background ICL) has no icon 2",
+        "missing_icon: 32.icl (the background ICL) has no icon 2",
+    );
+
+    // Names.
+    expect(
+        Severity::Error,
+        "project.toml: controls: controls/bad.toml is listed twice",
     );
     expect(
         Severity::Error,
-        "project.toml: controls: page 1 is listed twice",
+        "controls/other.toml: gauge: gauge is also defined in controls/bad.toml",
     );
     expect(
         Severity::Error,
-        "project.toml: controls: page ID 4092 is not below 4092",
+        "controls/other.toml: FanOn: \"FanOn\" is not a name: use lowercase letters, \
+         digits and _, starting with a letter",
     );
     expect(
         Severity::Warning,
-        "project.toml: controls: page 2 has no background image in 32.icl",
+        "controls/other.toml: spare: no page lists it",
+    );
+    expect(
+        Severity::Error,
+        "project.toml: pages: page 6 lists ghost, which no controls file defines",
+    );
+    expect(
+        Severity::Warning,
+        "project.toml: pages: page 6 lists gauge twice",
+    );
+
+    expect(
+        Severity::Error,
+        "project.toml: pages: page 1 is listed twice",
+    );
+    expect(
+        Severity::Error,
+        "project.toml: pages: page ID 4092 is not below 4092",
+    );
+    expect(
+        Severity::Warning,
+        "project.toml: pages: page 2 has no background image in 32.icl",
     );
 
     // Errors stop the build before anything is written, and the build
@@ -625,6 +723,14 @@ fn rejects_unknown_fields_with_their_place() {
     write(dir.join("controls/main.toml"), "id = 0\n");
     let error = Project::load(&dir).unwrap_err().to_string();
     assert!(error.contains("unknown field `id`"), "{error}");
+
+    // A control's name is its table's, so it has no `name` key.
+    write(
+        dir.join("controls/main.toml"),
+        MAIN_PAGE.replace("type = \"icon\"", "type = \"icon\"\nname = \"power\""),
+    );
+    let error = Project::load(&dir).unwrap_err().to_string();
+    assert!(error.contains("unknown field `name`"), "{error}");
 
     write(dir.join("controls/main.toml"), MAIN_PAGE);
     std::fs::remove_file(dir.join("controls/keyboard.toml")).unwrap();
@@ -803,9 +909,11 @@ fn builds_no_config_without_the_table_and_checks_no_backgrounds() {
             "",
         )
         .replace(
-            LAST_CONTROLS,
-            &format!("{LAST_CONTROLS}{{ id = 5, path = \"controls/plain.toml\" }},\n"),
-        );
+            CONTROLS,
+            "controls = [\"controls/main.toml\", \"controls/keyboard.toml\", \
+             \"controls/plain.toml\"]",
+        )
+        .replace(LAST_PAGE, &format!("{LAST_PAGE}    {{ id = 5 }},\n"));
     write(dir.join("project.toml"), text);
     write(dir.join("controls/plain.toml"), "");
     let project = Project::load(&dir).unwrap();

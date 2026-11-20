@@ -53,13 +53,16 @@ my-hmi/
   images/home.png  images/fan-off.png  images/fan-on.png
 ```
 
-`project.toml` lists every file with its ID, so file and folder names are up
-to you.
+`project.toml` lists every file, so file and folder names are up to you.
+Pages list their controls by name.
 
 ```toml
 # project.toml
 screen = { w = 800, h = 480 }
-controls = [{ id = 0, path = "controls/home.toml" }]
+controls = ["controls/home.toml"]
+pages = [
+    { id = 0, controls = ["fan", "fan_on", "fan_off", "temperature"] },
+]
 
 [config]
 background_icl = 32
@@ -77,10 +80,10 @@ images = [
 ```
 
 ```toml
-# controls/home.toml: page 0
+# controls/home.toml
 
 # Fan state at 0x1000: 0 off, 1 on.
-[[control]]
+[control.fan]
 type = "icon"
 vp = 0x1000
 position = { x = 100, y = 200 }
@@ -89,22 +92,20 @@ val_max = 1
 icon_min = 0
 icon_max = 1
 
-[[control]]
+[control.fan_on]
 type = "button"
-name = "fan on"
 area = { x = 300, y = 200, w = 120, h = 60 }
 vp = 0x1000
 value = 1
 
-[[control]]
+[control.fan_off]
 type = "button"
-name = "fan off"
 area = { x = 440, y = 200, w = 120, h = 60 }
 vp = 0x1000
 value = 0
 
 # Temperature in 0.1 °C, written by the firmware: 235 shows "23.5 C".
-[[control]]
+[control.temperature]
 type = "data"
 vp = 0x1001
 position = { x = 100, y = 100 }
@@ -127,7 +128,8 @@ the firmware, and the display reports each write over the UART.
 - Paths are relative to the project folder, wherever degus runs.
 - Unknown keys are errors, so a typo never falls back to a default.
 - TOML puts every key after a table header such as `[config]` or `[[icl]]`
-  into that table, so plain keys like `controls` and `copy` go first.
+  into that table, so plain keys like `controls`, `pages` and `copy` go
+  first.
 
 ## `project.toml`
 
@@ -136,7 +138,8 @@ the firmware, and the display reports each write over the UART.
 | `screen` | required | `{ w, h }`. Controls must fit inside it. |
 | `chip` | `"t5l2"` | `"t5l1"` or `"t5l2"`. Sets the largest image: about 248 KB of JPEG on a T5L1, 760 KB on a T5L2. |
 | `output` | `"target"` | Folder the build writes `DWIN_SET` in. |
-| `controls` | `[]` | The controls file of each page, `{ id, path }`; `id` is the page ID, below 4092. Several pages may share a file. A page without controls needs no entry. |
+| `controls` | `[]` | The controls files, by path. Each defines controls by name. |
+| `pages` | `[]` | The pages with controls, `{ id, controls }`; `id` is the page ID, below 4092, and `controls` lists the names of its controls in drawing order. A page without controls needs no entry. |
 | `copy` | `[]` | Files copied into `DWIN_SET` unchanged, such as fonts. |
 | `[config]` | none | The hardware configuration, written as `T5LCFG.CFG`. |
 | `[[icl]]` | none | An image library. |
@@ -222,9 +225,23 @@ settings stay as they are.
 
 ## Controls files
 
-A controls file is a list of `[[control]]` tables, each picked by its
-`type`. They are in drawing order: later display controls draw over earlier
-ones. Every control takes an optional `name`, used in check messages.
+A controls file defines controls as `[control.<name>]` tables, each picked
+by its `type`. Pages list them by name, and check messages name them so. A
+name is lowercase letters, digits and `_`, starting with a letter, and is
+used once across the project's controls files.
+
+A control on several pages, such as a clock or a keypad, is defined once and
+listed by each page:
+
+```toml
+pages = [
+    { id = 0, controls = ["clock", "fan", "fan_on", "fan_off"] },
+    { id = 1, controls = ["clock", "setpoint", "back"] },
+]
+```
+
+The order of a file means nothing: a page's list is its drawing order, and
+later display controls draw over earlier ones.
 
 Touch controls (`button`, `key`, `input`) also take:
 
@@ -257,7 +274,7 @@ Pressing `area` starts typing a number, edited with `key` controls; enter
 writes it to `vp` (DGUS: "Data input").
 
 ```toml
-[[control]]
+[control.setpoint]
 type = "input"
 area = { x = 100, y = 100, w = 200, h = 40 }
 vp = 0x1030
@@ -276,7 +293,7 @@ keyboard = { page = 20, area = { x = 0, y = 0, w = 300, h = 200 }, position = { 
 | `integer_digits` | `8` | |
 | `decimal_digits` | `0` | |
 | `limits` | none | `{ min, max }`; numbers outside are rejected. The bounds ignore the decimal point: with 1 decimal digit, `1000` means 100.0. |
-| `keyboard` | none | `{ page, area, position }`: while typing, `area` of page `page` is drawn at `position`, and that page's `key` controls inside `area` work. Without it, the keys are the `key` controls of this page. |
+| `keyboard` | none | `{ page, area, position }`: while typing, `area` of page `page` is drawn at `position`, and that page's `key` controls inside `area` work. Without it, the keys are the `key` controls of the page the input is on. |
 | `color` | `"#000000"` | Colour of the typed number. |
 | `font` | `0` | Font ID. |
 | `font_size` | `16` | Character width in pixels. |
@@ -401,8 +418,11 @@ Errors:
 
 - TOML that does not parse, unknown keys, missing required keys, and files
   that are not there;
-- IDs listed twice: images in an ICL, clips in a WAE, pages in `controls`,
+- IDs listed twice: images in an ICL, clips in a WAE, pages in `pages`,
   and file numbers (13 and 14 are taken);
+- controls files listed twice, a control name defined in two files, names
+  that are not lowercase letters, digits and `_`, and names a page lists
+  that no controls file defines;
 - a `background_icl` that is not a declared `[[icl]]`;
 - `[config]` values out of range, and a `baud` the UART cannot reach;
 - copied files named like a generated file, or a second `T5LCFG*.CFG`;
@@ -420,6 +440,7 @@ Errors:
 Warnings:
 
 - pages without a background image, when `background_icl` is set;
+- controls no page lists, and a control a page lists twice;
 - `next_page` and `pressed_page` that point nowhere;
 - inputs whose keyboard page has no `key` controls;
 - `icon` value and image ranges of different lengths;
@@ -496,7 +517,7 @@ answers `ack`, `data 0x1000 0x0001` or `error ...`, and sends
 
 The window shows the screen, which takes clicks as touches, the pages, a
 command box for script lines, VP watches, the VP memory and a log. Its
-"outlines" box draws each control's box and names its controls file.
+"outlines" box draws each control's box and names it and its controls file.
 
 The simulator is a preview, not the panel:
 

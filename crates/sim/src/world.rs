@@ -112,12 +112,19 @@ impl World {
         let (controls, sources) = project.to_controls_with_sources();
         let icons = ProjectIcons::new(project);
 
+        // A page's label is the files its controls come from.
         let mut labels: BTreeMap<u16, Vec<String>> = BTreeMap::new();
-        for entry in &project.controls {
-            labels
-                .entry(entry.id)
-                .or_default()
-                .push(entry.path.display().to_string());
+        for page in &project.config.pages {
+            let files = labels.entry(page.id).or_default();
+            for name in &page.controls {
+                let Some((entry, _)) = project.control(name) else {
+                    continue;
+                };
+                let file = project.controls[entry].path.display().to_string();
+                if !files.contains(&file) {
+                    files.push(file);
+                }
+            }
         }
         for id in icons.ids(config.background_icl.into()) {
             labels.entry(id).or_default();
@@ -151,18 +158,14 @@ impl World {
         })
     }
 
-    /// Where a control comes from, such as `controls/home.toml: control 4
-    /// ("fan on")`, numbered from 1 like the check's messages.
+    /// Where a control comes from, such as `controls/home.toml: fan_on`, as
+    /// the check's messages name it.
     pub fn describe(&self, source: &SourceRef) -> String {
         let file = self
             .files
             .get(source.entry)
             .map_or_else(|| "?".to_owned(), |path| path.display().to_string());
-        let mut text = format!("{file}: control {}", source.index + 1);
-        if let Some(name) = &source.name {
-            text.push_str(&format!(" ({name:?})"));
-        }
-        text
+        format!("{file}: {}", source.name)
     }
 }
 

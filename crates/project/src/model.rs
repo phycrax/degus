@@ -1,9 +1,10 @@
-//! The project description: the project file and the controls files it
-//! lists.
+//! The project description: the project file, with its pages, and the
+//! controls files it lists.
 //!
 //! Field names follow `degus-controls`. Geometry is written as `x, y, w, h`
 //! instead of the files' start and end corners.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -36,9 +37,13 @@ pub struct ProjectFile {
     /// Folder the build writes `DWIN_SET` in, relative to the project root.
     #[serde(default = "default_output")]
     pub output: PathBuf,
-    /// The controls file of each page.
+    /// The controls files, relative to the project root. Each defines
+    /// controls by name, for pages to list.
     #[serde(default)]
-    pub controls: Vec<ControlsSpec>,
+    pub controls: Vec<PathBuf>,
+    /// The pages with controls.
+    #[serde(default)]
+    pub pages: Vec<PageSpec>,
     /// Files copied into the output unchanged.
     #[serde(default)]
     pub copy: Vec<PathBuf>,
@@ -361,27 +366,29 @@ impl From<DownmixKind> for Downmix {
     }
 }
 
-/// A page's entry in `controls`.
+/// A page's entry in `pages`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ControlsSpec {
+pub struct PageSpec {
     /// Page ID, below 4092. The page shows image `id` of the background ICL.
     pub id: u16,
-    /// The controls file, relative to the project root.
-    pub path: PathBuf,
+    /// Names of its controls, in drawing order. Touch and display controls
+    /// may be mixed; the build keeps the order of each kind.
+    #[serde(default)]
+    pub controls: Vec<String>,
 }
 
-/// A controls file: the controls of a page.
+/// A controls file: controls by name, for pages to list.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ControlsFile {
-    /// Controls in drawing order. Touch and display controls may be mixed;
-    /// the build keeps the order of each kind.
+    /// `[control.<name>]` tables. Their order in the file means nothing; a
+    /// page's list sets the drawing order.
     #[serde(default, rename = "control")]
-    pub controls: Vec<Control>,
+    pub controls: BTreeMap<String, Control>,
 }
 
-/// A control on a page, selected by its `type` key.
+/// A control, selected by its `type` key.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Control {
@@ -404,18 +411,6 @@ pub enum Control {
 }
 
 impl Control {
-    pub fn name(&self) -> Option<&str> {
-        match self {
-            Control::Button(c) => c.name.as_deref(),
-            Control::Key(c) => c.name.as_deref(),
-            Control::Input(c) => c.name.as_deref(),
-            Control::Icon(c) => c.name.as_deref(),
-            Control::Data(c) => c.name.as_deref(),
-            Control::Text(c) => c.name.as_deref(),
-            Control::Progress(c) => c.name.as_deref(),
-        }
-    }
-
     /// Whether the control goes to the touch file.
     pub fn is_touch(&self) -> bool {
         matches!(
@@ -536,7 +531,6 @@ impl<'de> Deserialize<'de> for Color {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Button {
-    pub name: Option<String>,
     pub area: Rect,
     /// Page to switch to on release.
     pub next_page: Option<u16>,
@@ -563,7 +557,6 @@ fn yes() -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Key {
-    pub name: Option<String>,
     pub area: Rect,
     /// Page to switch to on release.
     pub next_page: Option<u16>,
@@ -577,7 +570,6 @@ pub struct Key {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Input {
-    pub name: Option<String>,
     /// Pressing it starts input.
     pub area: Rect,
     /// Page to switch to on release.
@@ -652,7 +644,6 @@ pub struct Limits {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Icon {
-    pub name: Option<String>,
     pub vp: u16,
     /// Description pointer.
     pub sp: Option<u16>,
@@ -691,7 +682,6 @@ fn default_filter() -> u8 {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Data {
-    pub name: Option<String>,
     pub vp: u16,
     /// Description pointer.
     pub sp: Option<u16>,
@@ -733,7 +723,6 @@ fn default_integer_digits() -> u8 {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Text {
-    pub name: Option<String>,
     pub vp: u16,
     /// Description pointer.
     pub sp: Option<u16>,
@@ -784,7 +773,6 @@ fn default_font_height() -> u8 {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Progress {
-    pub name: Option<String>,
     pub vp: u16,
     /// Description pointer.
     pub sp: Option<u16>,
