@@ -18,16 +18,12 @@ pub(crate) struct Decoded {
     pub rate: u32,
 }
 
-/// Decodes the first audio track of an encoded file into mono.
-/// `extension` is a hint for container detection.
-pub(crate) fn decode(bytes: Vec<u8>, extension: Option<&str>, downmix: Downmix) -> Result<Decoded> {
+/// Decodes the first audio track of an encoded file into mono. The
+/// container is told by its content.
+pub(crate) fn decode(bytes: Vec<u8>, downmix: Downmix) -> Result<Decoded> {
     let stream = MediaSourceStream::new(Box::new(std::io::Cursor::new(bytes)), Default::default());
-    let mut hint = Hint::new();
-    if let Some(extension) = extension {
-        hint.with_extension(extension);
-    }
     let mut format = symphonia::default::get_probe().probe(
-        &hint,
+        &Hint::new(),
         stream,
         FormatOptions::default(),
         MetadataOptions::default(),

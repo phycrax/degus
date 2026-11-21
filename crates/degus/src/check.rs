@@ -2,13 +2,15 @@ use std::collections::BTreeSet;
 use std::fmt;
 
 use degus_controls::{
-    Area, DISPLAY_FILE_NAME, Display, IconVar, Keyboard, MAX_DISPLAYS_PER_PAGE, MAX_PAGES, Point,
-    TOUCH_FILE_NAME, Touch, TouchAction, key,
+    Area, Display, IconVar, Keyboard, MAX_DISPLAYS_PER_PAGE, MAX_PAGES, Point, Touch, TouchAction,
+    key,
 };
 use degus_icl::Icl;
 
-use crate::bundle::{Bundle, LayoutProblem, icl_name, is_config_file, layout_problems, wae_name};
-use crate::file::number;
+use crate::bundle::{Bundle, LayoutProblem, layout_problems};
+use crate::file::{
+    CONFIG_FILE, DISPLAY_FILE, TOUCH_FILE, icl_name, is_config_file, number, wae_name,
+};
 
 /// The background ICL of a display whose configuration names no other.
 const DEFAULT_BACKGROUND_ICL: u8 = 32;
@@ -65,7 +67,7 @@ impl fmt::Display for Location {
             Location::Icl(file) => write!(f, "{}", icl_name(*file)),
             Location::Icon { icl, id } => write!(f, "{}, icon {id}", icl_name(*icl)),
             Location::Wae(file) => write!(f, "{}", wae_name(*file)),
-            Location::Config => f.write_str(degus_config::FILE_NAME),
+            Location::Config => f.write_str(CONFIG_FILE),
             Location::File(name) => f.write_str(name),
         }
     }
@@ -164,14 +166,14 @@ impl<'a> Checker<'a> {
         let mut files: Vec<(String, usize)> = Vec::new();
         if let Some(config) = &bundle.config {
             match config.to_bytes() {
-                Ok(bytes) => files.push((degus_config::FILE_NAME.to_owned(), bytes.len())),
+                Ok(bytes) => files.push((CONFIG_FILE.to_owned(), bytes.len())),
                 Err(error) => self.error(Location::Config, error.to_string()),
             }
         }
         match bundle.controls.to_bytes() {
             Ok(built) => {
-                files.push((TOUCH_FILE_NAME.to_owned(), built.touch.len()));
-                files.push((DISPLAY_FILE_NAME.to_owned(), built.display.len()));
+                files.push((TOUCH_FILE.to_owned(), built.touch.len()));
+                files.push((DISPLAY_FILE.to_owned(), built.display.len()));
             }
             Err(error) => {
                 let (location, message) = controls_problem(error);
@@ -198,7 +200,7 @@ impl<'a> Checker<'a> {
                     Location::File(name.clone()),
                     format!(
                         "the display would read it as well as the {} the bundle writes",
-                        degus_config::FILE_NAME
+                        CONFIG_FILE
                     ),
                 );
             }
@@ -591,9 +593,6 @@ fn controls_problem(error: degus_controls::Error) -> (Location, String) {
             Location::Page(page),
             format!("has {count} display controls; a page holds at most {MAX_DISPLAYS_PER_PAGE}"),
         ),
-        other => (
-            Location::File(DISPLAY_FILE_NAME.to_owned()),
-            other.to_string(),
-        ),
+        other => (Location::File(DISPLAY_FILE.to_owned()), other.to_string()),
     }
 }

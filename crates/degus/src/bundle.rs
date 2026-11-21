@@ -3,13 +3,13 @@ use std::fmt;
 use std::path::Path;
 
 use degus_config::Config;
-use degus_controls::{Controls, DISPLAY_FILE_NAME, TOUCH_FILE_NAME};
+use degus_controls::Controls;
 use degus_icl::{Chip, Icl};
 use degus_wae::Wae;
 
 use crate::check::Diagnostic;
 use crate::error::{Error, Result, io_error};
-use crate::file::{File, number};
+use crate::file::{CONFIG_FILE, DISPLAY_FILE, File, Role, TOUCH_FILE, icl_name, number, wae_name};
 
 /// The folder the display downloads from the root of its SD card.
 pub const FOLDER: &str = "DWIN_SET";
@@ -194,11 +194,11 @@ impl Bundle {
     pub fn to_files(&self) -> Result<Vec<File>> {
         let mut files = Vec::new();
         if let Some(config) = &self.config {
-            files.push(File::new(degus_config::FILE_NAME, config.to_bytes()?));
+            files.push(File::new(CONFIG_FILE, config.to_bytes()?));
         }
         let controls = self.controls.to_bytes()?;
-        files.push(File::new(TOUCH_FILE_NAME, controls.touch));
-        files.push(File::new(DISPLAY_FILE_NAME, controls.display));
+        files.push(File::new(TOUCH_FILE, controls.touch));
+        files.push(File::new(DISPLAY_FILE, controls.display));
         for (&file, icl) in &self.icls {
             let bytes = icl
                 .to_bytes(file)
@@ -257,52 +257,6 @@ impl Bundle {
             warnings: diagnostics,
         })
     }
-}
-
-/// What a file of the folder is to the display.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Role {
-    Config,
-    Touch,
-    Display,
-    Icl(u8),
-    Wae(u8),
-    Other,
-}
-
-impl Role {
-    fn of(name: &str) -> Self {
-        let lower = name.to_ascii_lowercase();
-        let number = number(name);
-        let library = number.and_then(|number| u8::try_from(number).ok());
-        if is_config_file(name) {
-            Role::Config
-        } else if let (Some(number), true) = (library, lower.ends_with(".icl")) {
-            Role::Icl(number)
-        } else if let (Some(number), true) = (library, lower.ends_with(".wae")) {
-            Role::Wae(number)
-        } else if lower.ends_with(".bin") && number == Some(13) {
-            Role::Touch
-        } else if lower.ends_with(".bin") && number == Some(14) {
-            Role::Display
-        } else {
-            Role::Other
-        }
-    }
-}
-
-/// The display reads any `T5LCFG*.CFG` as its configuration.
-pub(crate) fn is_config_file(name: &str) -> bool {
-    let name = name.to_ascii_uppercase();
-    name.starts_with("T5LCFG") && name.ends_with(".CFG")
-}
-
-pub(crate) fn icl_name(file: u8) -> String {
-    format!("{file}.icl")
-}
-
-pub(crate) fn wae_name(file: u8) -> String {
-    format!("{file}.wae")
 }
 
 /// Numbered files by number, then the others by name.

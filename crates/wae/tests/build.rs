@@ -1,5 +1,4 @@
 use std::f32::consts::TAU;
-use std::path::{Path, PathBuf};
 
 use crc::{CRC_16_MODBUS, Crc};
 use degus_wae::{ClipSource, Downmix, Error, SampleFormat, Wae, WaeBuilder, WaeOptions};
@@ -20,28 +19,23 @@ fn samples(rate: u32, samples: &[i16]) -> ClipSource {
     }
 }
 
-/// Writes a 16-bit WAV; `channels` holds one sample vector per channel.
-fn write_wav(path: &Path, rate: u32, channels: &[Vec<i16>]) {
+/// A 16-bit WAV file; `channels` holds one sample vector per channel.
+fn wav(rate: u32, channels: &[Vec<i16>]) -> ClipSource {
     let spec = hound::WavSpec {
         channels: channels.len() as u16,
         sample_rate: rate,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
-    let mut writer = hound::WavWriter::create(path, spec).unwrap();
+    let mut file = std::io::Cursor::new(Vec::new());
+    let mut writer = hound::WavWriter::new(&mut file, spec).unwrap();
     for frame in 0..channels[0].len() {
         for channel in channels {
             writer.write_sample(channel[frame]).unwrap();
         }
     }
     writer.finalize().unwrap();
-}
-
-fn temp_dir(name: &str) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+    ClipSource::Encoded(file.into_inner())
 }
 
 fn be32(data: &[u8], at: usize) -> u32 {
@@ -182,25 +176,17 @@ fn companded_clips_use_one_byte_per_sample() {
 
 #[test]
 fn wav_at_target_rate_keeps_its_samples() {
-    let dir = temp_dir("wav_at_target_rate_keeps_its_samples");
     let input = sine(32_000, 523.0, 0.25, 12345.0);
-    let path = dir.join("tone.wav");
-    write_wav(&path, 32_000, std::slice::from_ref(&input));
-
     let mut builder = WaeBuilder::new(WaeOptions::default());
-    builder.insert(4, ClipSource::File(path));
+    builder.insert(4, wav(32_000, std::slice::from_ref(&input)));
     assert_converted(&built_samples(&builder, 4), &input);
 }
 
 #[test]
 fn resamples_to_the_target_rate() {
-    let dir = temp_dir("resamples_to_the_target_rate");
     let tone = sine(44_100, 1000.0, 1.0, 16000.0);
-    let path = dir.join("tone.wav");
-    write_wav(&path, 44_100, std::slice::from_ref(&tone));
-
     let mut builder = WaeBuilder::new(WaeOptions::default());
-    builder.insert(1, ClipSource::File(path));
+    builder.insert(1, wav(44_100, std::slice::from_ref(&tone)));
     let resampled = built_samples(&builder, 1);
     assert!(
         resampled.len().abs_diff(32_001) <= 320,
@@ -215,18 +201,16 @@ fn resamples_to_the_target_rate() {
 
 #[test]
 fn downmix_keeps_left_or_averages() {
-    let dir = temp_dir("downmix_keeps_left_or_averages");
     let tone = sine(32_000, 1000.0, 0.1, 16000.0);
     let inverted: Vec<i16> = tone.iter().map(|s| -s).collect();
-    let path = dir.join("opposed.wav");
-    write_wav(&path, 32_000, &[tone.clone(), inverted]);
+    let opposed = wav(32_000, &[tone.clone(), inverted]);
 
     let build = |downmix| {
         let mut builder = WaeBuilder::new(WaeOptions {
             downmix,
             ..WaeOptions::default()
         });
-        builder.insert(1, ClipSource::File(path.clone()));
+        builder.insert(1, opposed.clone());
         built_samples(&builder, 1)
     };
     // DWIN's tools keep the left channel.

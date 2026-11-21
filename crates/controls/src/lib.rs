@@ -13,7 +13,7 @@
 //! Colours are RGB565; [`rgb565`] converts `0xRRGGBB`. [`key`] has the key
 //! codes keyboards send.
 //!
-//! ```no_run
+//! ```
 //! use degus_controls::{Area, Controls, DataVar, IconVar, KeyCode, Point, Touch, rgb565};
 //!
 //! let mut controls = Controls::new();
@@ -46,8 +46,7 @@
 //! );
 //!
 //! let files = controls.to_bytes()?;
-//! std::fs::write(format!("DWIN_SET/{}", degus_controls::TOUCH_FILE_NAME), &files.touch)?;
-//! std::fs::write(format!("DWIN_SET/{}", degus_controls::DISPLAY_FILE_NAME), &files.display)?;
+//! assert_eq!(Controls::from_bytes(&files.touch, &files.display)?, controls);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
@@ -60,10 +59,7 @@ pub mod key;
 mod touch;
 
 pub use color::rgb565;
-pub use controls::{
-    ControlFiles, Controls, DISPLAY_FILE_NAME, MAX_DISPLAYS_PER_PAGE, MAX_PAGES, PageControls,
-    TOUCH_FILE_NAME,
-};
+pub use controls::{ControlFiles, Controls, MAX_DISPLAYS_PER_PAGE, MAX_PAGES, PageControls};
 pub use display::{
     Align, BarDataType, BarDirection, DataType, DataVar, Display, Encoding, IconVar, LayerMode,
     ProgressBar, TextAlign, TextVar, VerticalAlign,

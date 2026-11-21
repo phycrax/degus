@@ -1,4 +1,69 @@
+//! The names of the files in a `DWIN_SET` folder: those a bundle writes,
+//! and what each name is to the display.
+
 use crate::bundle::SLOT_SIZE;
+
+/// The configuration file a bundle writes. The display reads any
+/// `T5LCFG*.CFG` as its configuration.
+pub const CONFIG_FILE: &str = "T5LCFG.CFG";
+/// The touch control file a bundle writes, named as DWIN's tools name it.
+/// The display reads file 13 ending in `.bin` as its touch controls.
+pub const TOUCH_FILE: &str = "13TouchFile.bin";
+/// The display control file a bundle writes, named as DWIN's tools name
+/// it. The display reads file 14 ending in `.bin` as its display controls.
+pub const DISPLAY_FILE: &str = "14ShowFile.bin";
+
+const TOUCH_NUMBER: u16 = 13;
+const DISPLAY_NUMBER: u16 = 14;
+
+/// What a file of the folder is to the display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Role {
+    Config,
+    Touch,
+    Display,
+    Icl(u8),
+    Wae(u8),
+    Other,
+}
+
+impl Role {
+    /// The role of the file named `name`, ignoring case.
+    pub(crate) fn of(name: &str) -> Self {
+        let lower = name.to_ascii_lowercase();
+        let number = number(name);
+        let library = number.and_then(|number| u8::try_from(number).ok());
+        if is_config_file(name) {
+            Role::Config
+        } else if let (Some(number), true) = (library, lower.ends_with(".icl")) {
+            Role::Icl(number)
+        } else if let (Some(number), true) = (library, lower.ends_with(".wae")) {
+            Role::Wae(number)
+        } else if lower.ends_with(".bin") && number == Some(TOUCH_NUMBER) {
+            Role::Touch
+        } else if lower.ends_with(".bin") && number == Some(DISPLAY_NUMBER) {
+            Role::Display
+        } else {
+            Role::Other
+        }
+    }
+}
+
+/// The display reads any `T5LCFG*.CFG` as its configuration.
+pub(crate) fn is_config_file(name: &str) -> bool {
+    let name = name.to_ascii_uppercase();
+    name.starts_with("T5LCFG") && name.ends_with(".CFG")
+}
+
+/// The name a bundle writes the ICL of file number `file` under.
+pub(crate) fn icl_name(file: u8) -> String {
+    format!("{file}.icl")
+}
+
+/// The name a bundle writes the WAE of file number `file` under.
+pub(crate) fn wae_name(file: u8) -> String {
+    format!("{file}.wae")
+}
 
 /// A file of a `DWIN_SET` folder.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -14,8 +14,8 @@ pub enum Error {
     Baud(u32),
     #[error("sd_folder {0:?} must be 1-8 characters of 0-9, A-Z, a-z, _ and -")]
     SdFolder(String),
-    #[error("not a T5LCFG.CFG file: it does not start with T5LC1")]
+    #[error("not a configuration file: it does not start with T5LC1")]
     Magic,
-    #[error("a T5LCFG.CFG file holds at least 16 bytes, not {0}")]
+    #[error("a configuration file holds at least 16 bytes, not {0}")]
     TooShort(usize),
 }

@@ -23,13 +23,13 @@ pub enum Error {
         "page {page}, touch control {index}: an unknown control's record must be whole 16-byte units of at most 64 bytes, starting with FE or FD"
     )]
     UnknownTouch { page: u16, index: usize },
-    #[error("not a display file (14): it does not start with the DGUS II header")]
+    #[error("not a display file: it does not start with the DGUS II header")]
     NotDisplayFile,
-    #[error("the display file (14) puts the controls of page {page} past its end")]
+    #[error("the display file puts the controls of page {page} past its end")]
     PageTable { page: u16 },
-    #[error("the touch file (13) ends without its FF FF end marker")]
+    #[error("the touch file ends without its FF FF end marker")]
     TouchFileEnd,
-    #[error("the touch file (13) has a record at offset {offset} that is not a touch control")]
+    #[error("the touch file has a record at offset {offset} that is not a touch control")]
     TouchRecord { offset: usize },
     #[error(
         "page {page}, display control {index}: unit {unit:?} must be ASCII and at most 11 bytes"

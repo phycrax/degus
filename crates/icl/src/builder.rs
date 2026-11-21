@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 use image::DynamicImage;
 
@@ -11,8 +10,6 @@ use crate::options::IclOptions;
 /// Where an icon's pixels come from.
 #[derive(Debug, Clone)]
 pub enum IconSource {
-    /// An image file (PNG, BMP, GIF or JPEG).
-    File(PathBuf),
     /// Encoded image bytes (PNG, BMP, GIF or JPEG).
     Encoded(Vec<u8>),
     /// Decoded pixels.

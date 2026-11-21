@@ -11,13 +11,6 @@ use crate::options::{IclOptions, OversizePolicy, Subsampling};
 pub(crate) fn encode_source(source: &IconSource, options: &IclOptions) -> Result<PreparedJpeg> {
     let limit = options.chip.max_jpeg_size();
     match source {
-        IconSource::File(path) => {
-            let bytes = std::fs::read(path).map_err(|source| Error::Io {
-                path: path.clone(),
-                source,
-            })?;
-            encode_bytes(&bytes, options, limit)
-        }
         IconSource::Encoded(bytes) => encode_bytes(bytes, options, limit),
         IconSource::Image(image) => Ok(encode_image(image, options, limit)?.0),
         IconSource::Jpeg(bytes) => jpeg::prepare(bytes, limit),

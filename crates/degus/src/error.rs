@@ -21,7 +21,7 @@ pub enum Error {
     /// diagnostic, warnings included, and prints them all.
     #[error("{}", check_message(.0))]
     Check(Vec<Diagnostic>),
-    #[error("{name}: {0}", name = degus_config::FILE_NAME)]
+    #[error("{name}: {0}", name = crate::CONFIG_FILE)]
     Config(#[from] degus_config::Error),
     #[error(transparent)]
     Controls(#[from] degus_controls::Error),

@@ -9,7 +9,7 @@
 //! panel; take them from the display's own CFG file if they must be
 //! rewritten.
 //!
-//! ```no_run
+//! ```
 //! use degus_config::{Config, Rotation};
 //!
 //! let config = Config {
@@ -18,7 +18,8 @@
 //!     brightness: 80,
 //!     ..Config::default()
 //! };
-//! std::fs::write(format!("DWIN_SET/{}", degus_config::FILE_NAME), config.to_bytes()?)?;
+//! let file = config.to_bytes()?;
+//! assert_eq!(Config::from_bytes(&file)?, config);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
@@ -26,7 +27,6 @@ mod config;
 mod error;
 
 pub use config::{
-    Audio, BAUD_CLOCK, Buzzer, ClockOut, Config, FILE_LEN, FILE_NAME, Lcd, NandSize, Rotation,
-    TouchPanel,
+    Audio, BAUD_CLOCK, Buzzer, ClockOut, Config, FILE_LEN, Lcd, NandSize, Rotation, TouchPanel,
 };
 pub use error::{Error, Result};

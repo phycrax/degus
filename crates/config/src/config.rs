@@ -1,8 +1,5 @@
 use crate::error::{Error, Result};
 
-/// Name the DGUS tools give the file. The display reads any file named
-/// `T5LCFG*.CFG` in its download folder.
-pub const FILE_NAME: &str = "T5LCFG.CFG";
 /// Length of a built file: every documented field and the reserved bytes
 /// after them.
 pub const FILE_LEN: usize = 0x80;

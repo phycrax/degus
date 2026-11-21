@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 use crate::audio;
 use crate::error::{Error, Result};
@@ -10,8 +9,6 @@ use crate::wae::Wae;
 /// Where a clip's audio comes from.
 #[derive(Debug, Clone)]
 pub enum ClipSource {
-    /// An audio file (WAV, MP3, FLAC or Ogg Vorbis).
-    File(PathBuf),
     /// Encoded audio file bytes (WAV, MP3, FLAC or Ogg Vorbis).
     Encoded(Vec<u8>),
     /// Mono 16-bit samples at `rate` Hz.
@@ -98,15 +95,7 @@ fn convert(source: &ClipSource, downmix: Downmix) -> Result<Vec<i16>> {
             samples: audio::to_f32(samples),
             rate: *rate,
         },
-        ClipSource::File(path) => {
-            let bytes = std::fs::read(path).map_err(|source| Error::Io {
-                path: path.clone(),
-                source,
-            })?;
-            let extension = path.extension().and_then(|ext| ext.to_str());
-            audio::decode(bytes, extension, downmix)?
-        }
-        ClipSource::Encoded(bytes) => audio::decode(bytes.clone(), None, downmix)?,
+        ClipSource::Encoded(bytes) => audio::decode(bytes.clone(), downmix)?,
     };
     if decoded.samples.is_empty() {
         return Err(Error::EmptyAudio);

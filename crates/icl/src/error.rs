@@ -1,16 +1,8 @@
-use std::path::PathBuf;
-
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Errors produced while building, writing or reading ICL files.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("{}: {source}", path.display())]
-    Io {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
     #[error("failed to decode image: {0}")]
     Decode(#[from] image::ImageError),
     #[error("failed to encode JPEG: {0}")]

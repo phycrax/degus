@@ -15,10 +15,10 @@
 //!     format: SampleFormat::Companded8,
 //!     ..WaeOptions::default()
 //! });
-//! builder.insert(0, ClipSource::File("audio/beep.wav".into()));
-//! builder.insert(1, ClipSource::File("audio/alarm.mp3".into()));
+//! builder.insert(0, ClipSource::Encoded(std::fs::read("audio/beep.wav")?));
+//! builder.insert(1, ClipSource::Encoded(std::fs::read("audio/alarm.mp3")?));
 //! let wae = builder.build()?;
-//! std::fs::write("33.wae", wae.to_bytes()?)?;
+//! let file = wae.to_bytes()?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 

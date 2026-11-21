@@ -18,7 +18,7 @@
 //! let mut bundle = Bundle::new(Device::new(Size::new(800, 480)));
 //!
 //! let mut backgrounds = IclBuilder::new(IclOptions::default());
-//! backgrounds.insert(0, IconSource::File("home.png".into()));
+//! backgrounds.insert(0, IconSource::Encoded(std::fs::read("home.png")?));
 //! bundle.icls.insert(32, backgrounds.build()?);
 //!
 //! bundle.controls.page_mut(0).touch.push(Touch::new(
@@ -46,4 +46,4 @@ pub use degus_wae as wae;
 pub use bundle::{Bundle, Device, FOLDER, SLOT_SIZE, Size, Written};
 pub use check::{Diagnostic, Location, Severity};
 pub use error::{Error, Result};
-pub use file::File;
+pub use file::{CONFIG_FILE, DISPLAY_FILE, File, TOUCH_FILE};

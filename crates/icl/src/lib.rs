@@ -11,10 +11,10 @@
 //! use degus_icl::{IclBuilder, IclOptions, IconSource};
 //!
 //! let mut builder = IclBuilder::new(IclOptions::default());
-//! builder.insert(0, IconSource::File("images/home.png".into()));
-//! builder.insert(1, IconSource::File("images/settings.png".into()));
+//! builder.insert(0, IconSource::Encoded(std::fs::read("images/home.png")?));
+//! builder.insert(1, IconSource::Encoded(std::fs::read("images/settings.png")?));
 //! let icl = builder.build()?;
-//! std::fs::write("32.icl", icl.to_bytes(32)?)?;
+//! let file = icl.to_bytes(32)?; // for file number 32
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 

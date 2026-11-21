@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use crc::{CRC_16_MODBUS, Crc};
 use degus_icl::{
     Chip, Error, Icl, IclBuilder, IclOptions, IconSource, OversizePolicy, Subsampling,
@@ -256,20 +254,21 @@ fn records_stay_within_16mb_flash_banks() {
 }
 
 #[test]
-fn file_sources_are_read_from_disk() {
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("file_sources_are_read_from_disk");
-    std::fs::create_dir_all(&dir).unwrap();
-    gradient(12, 8).save(dir.join("logo.png")).unwrap();
+fn encoded_sources_are_decoded() {
+    let mut png = std::io::Cursor::new(Vec::new());
+    gradient(12, 8)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
 
     let mut builder = IclBuilder::new(IclOptions::default());
-    builder.insert(5, IconSource::File(dir.join("logo.png")));
+    builder.insert(5, IconSource::Encoded(png.into_inner()));
     let icl = builder.build().unwrap();
     assert_eq!((icl.icons[&5].width(), icl.icons[&5].height()), (12, 8));
 
-    builder.insert(6, IconSource::File(dir.join("missing.png")));
+    builder.insert(6, IconSource::Encoded(b"not an image".to_vec()));
     assert!(matches!(
         builder.build(),
-        Err(Error::Icon { id: 6, source }) if matches!(*source, Error::Io { .. })
+        Err(Error::Icon { id: 6, source }) if matches!(*source, Error::Decode(_))
     ));
 }
 

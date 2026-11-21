@@ -5,11 +5,6 @@ use crate::error::{Error, Result};
 use crate::geom::get_u16;
 use crate::touch::{CONTINUATION, Touch, UNIT_LEN};
 
-/// Name the DGUS editor gives the touch configuration file.
-pub const TOUCH_FILE_NAME: &str = "13TouchFile.bin";
-/// Name the DGUS editor gives the display variable configuration file.
-pub const DISPLAY_FILE_NAME: &str = "14ShowFile.bin";
-
 /// Page IDs must be below this: the display file's page table has 4092
 /// entries.
 pub const MAX_PAGES: u16 = 4092;
@@ -35,18 +30,16 @@ pub struct PageControls {
     pub display: Vec<Display>,
 }
 
-/// Touch (13) and display (14) controls of every page.
+/// Touch and display controls of every page.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Controls {
     pages: BTreeMap<u16, PageControls>,
 }
 
-/// Files 13 and 14, as [`Controls::to_bytes`] writes them.
+/// The touch and display files, as [`Controls::to_bytes`] writes them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControlFiles {
-    /// File 13, [`TOUCH_FILE_NAME`].
     pub touch: Vec<u8>,
-    /// File 14, [`DISPLAY_FILE_NAME`].
     pub display: Vec<u8>,
 }
 
@@ -96,7 +89,7 @@ impl Controls {
         self.pages.is_empty()
     }
 
-    /// Reads files 13 and 14.
+    /// Reads the touch and display files.
     ///
     /// Records the types here do not model are kept as
     /// [`TouchAction::Unknown`](crate::TouchAction::Unknown) and
@@ -158,7 +151,7 @@ impl Controls {
         Ok(())
     }
 
-    /// Writes files 13 and 14.
+    /// Writes the touch and display files.
     pub fn to_bytes(&self) -> Result<ControlFiles> {
         Ok(ControlFiles {
             touch: self.touch_file()?,
