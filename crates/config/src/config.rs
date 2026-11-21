@@ -6,10 +6,10 @@ pub const FILE_NAME: &str = "T5LCFG.CFG";
 /// Length of a built file: every documented field and the reserved bytes
 /// after them.
 pub const FILE_LEN: usize = 0x80;
-/// The UART divisor is `BAUD_CLOCK / baud`.
+/// The UART runs at `BAUD_CLOCK` / a divisor of 1-0x3FF, from 3225600 baud
+/// down to about 3150.
 pub const BAUD_CLOCK: u32 = 3_225_600;
-/// Largest UART divisor, giving about 3150 baud.
-pub const MAX_BAUD_DIVISOR: u16 = 0x03FF;
+const MAX_BAUD_DIVISOR: u16 = 0x03FF;
 
 const MAGIC: &[u8; 5] = b"T5LC1";
 /// Enable marker of the one-byte-marked blocks.
@@ -84,8 +84,11 @@ pub struct Config {
     pub background_icl: u8,
     /// 0x09: touch report rate is 400 Hz / `touch_report_div`.
     pub touch_report_div: u8,
-    /// 0x0A-0x0B: UART speed is [`BAUD_CLOCK`] / `baud_divisor`, 1-0x3FF.
-    pub baud_divisor: u16,
+    /// 0x0A-0x0B: UART speed, in baud. The file holds a divisor of
+    /// [`BAUD_CLOCK`], so the UART runs at the nearest rate one gives: 115200
+    /// and 9600 exactly, 250000 as 248123. Writing fails when that rate is
+    /// more than 2 % off; reading gives the rate the file's divisor runs at.
+    pub baud: u32,
     /// 0x0C: backlight brightness at power-on, 0-100 %.
     pub brightness: u8,
     /// 0x0D: backlight brightness in standby, 0-100 %.
@@ -134,7 +137,7 @@ impl Default for Config {
             music_wae: 0,
             background_icl: 32,
             touch_report_div: 0x28,
-            baud_divisor: 0x1C,
+            baud: 115_200,
             brightness: 100,
             standby_brightness: 0,
             standby_delay: 1000,
@@ -278,30 +281,10 @@ impl Default for Buzzer {
 }
 
 impl Config {
-    /// The divisor nearest to `baud`. The UART then runs at [`BAUD_CLOCK`] /
-    /// divisor, which can differ from `baud`. `None` when the divisor is out
-    /// of range or the rate it gives is more than 2 % off.
-    pub fn divisor_for_baud(baud: u32) -> Option<u16> {
-        if baud == 0 {
-            return None;
-        }
-        let divisor = (BAUD_CLOCK + baud / 2) / baud;
-        let divisor = u16::try_from(divisor)
-            .ok()
-            .filter(|d| (1..=MAX_BAUD_DIVISOR).contains(d))?;
-        let actual = BAUD_CLOCK / u32::from(divisor);
-        (actual.abs_diff(baud) <= baud / 50).then_some(divisor)
-    }
-
-    /// The UART speed `baud_divisor` gives, rounded to a whole baud.
-    pub fn baud(&self) -> u32 {
-        let divisor = u32::from(self.baud_divisor.max(1));
-        (BAUD_CLOCK + divisor / 2) / divisor
-    }
-
     /// Writes the file: [`FILE_LEN`] bytes, with disabled blocks zeroed.
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         self.validate()?;
+        let divisor = divisor_for(self.baud).ok_or(Error::Baud(self.baud))?;
         let mut b = vec![0; FILE_LEN];
         b[..MAGIC.len()].copy_from_slice(MAGIC);
         b[FLAGS] = bit(self.crc, 7)
@@ -322,7 +305,7 @@ impl Config {
         b[MUSIC_WAE] = self.music_wae;
         b[BACKGROUND_ICL] = self.background_icl;
         b[TOUCH_REPORT_DIV] = self.touch_report_div;
-        put_u16(&mut b, BAUD, self.baud_divisor);
+        put_u16(&mut b, BAUD, divisor);
         b[BRIGHTNESS] = self.brightness;
         b[STANDBY_BRIGHTNESS] = self.standby_brightness;
         put_u16(&mut b, STANDBY_DELAY, self.standby_delay);
@@ -428,7 +411,7 @@ impl Config {
             music_wae: b[MUSIC_WAE],
             background_icl: b[BACKGROUND_ICL],
             touch_report_div: b[TOUCH_REPORT_DIV],
-            baud_divisor: get_u16(&b, BAUD),
+            baud: baud_for(get_u16(&b, BAUD)),
             brightness: b[BRIGHTNESS],
             standby_brightness: b[STANDBY_BRIGHTNESS],
             standby_delay: get_u16(&b, STANDBY_DELAY),
@@ -479,12 +462,6 @@ impl Config {
         range("music_wae", self.music_wae, 0, 63)?;
         range("background_icl", self.background_icl, 16, 63)?;
         range("touch_report_div", self.touch_report_div, 1, 255)?;
-        range(
-            "baud_divisor",
-            self.baud_divisor,
-            1,
-            MAX_BAUD_DIVISOR.into(),
-        )?;
         range("brightness", self.brightness, 0, 100)?;
         range("standby_brightness", self.standby_brightness, 0, 100)?;
         if self.standby {
@@ -509,6 +486,29 @@ impl Config {
             return Err(Error::SdFolder(name.clone()));
         }
         Ok(())
+    }
+}
+
+/// The divisor nearest to `baud`, when it is in range and the rate it gives
+/// is within 2 % of `baud`.
+fn divisor_for(baud: u32) -> Option<u16> {
+    if baud == 0 {
+        return None;
+    }
+    let divisor = (BAUD_CLOCK + baud / 2) / baud;
+    let divisor = u16::try_from(divisor)
+        .ok()
+        .filter(|d| (1..=MAX_BAUD_DIVISOR).contains(d))?;
+    let actual = BAUD_CLOCK / u32::from(divisor);
+    (actual.abs_diff(baud) <= baud / 50).then_some(divisor)
+}
+
+/// The rate `divisor` gives, rounded to a whole baud. Every divisor in range
+/// gives a rate [`divisor_for`] maps back to it; 0 gives 0, which it rejects.
+fn baud_for(divisor: u16) -> u32 {
+    match u32::from(divisor) {
+        0 => 0,
+        divisor => (BAUD_CLOCK + divisor / 2) / divisor,
     }
 }
 

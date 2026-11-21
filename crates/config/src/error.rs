@@ -10,6 +10,8 @@ pub enum Error {
         min: i32,
         max: i32,
     },
+    #[error("baud is {0}, which the UART cannot run at within 2 %")]
+    Baud(u32),
     #[error("sd_folder {0:?} must be 1-8 characters of 0-9, A-Z, a-z, _ and -")]
     SdFolder(String),
     #[error("not a T5LCFG.CFG file: it does not start with T5LC1")]

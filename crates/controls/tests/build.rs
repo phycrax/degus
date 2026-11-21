@@ -439,10 +439,22 @@ fn writes_every_field() {
 }
 
 #[test]
+#[should_panic(expected = "page 4092: page IDs must be below 4092")]
+fn page_mut_rejects_page_ids_past_the_page_table() {
+    Controls::new().page_mut(4092);
+}
+
+#[test]
+#[should_panic(expected = "page 4092: page IDs must be below 4092")]
+fn insert_rejects_page_ids_past_the_page_table() {
+    Controls::new().insert(4092, PageControls::default());
+}
+
+#[test]
 fn rejects_what_the_files_cannot_hold() {
     let mut controls = Controls::new();
-    controls.page_mut(4092);
-    assert_matches!(controls.to_bytes(), Err(Error::PageId { page: 4092 }));
+    controls.page_mut(4091);
+    assert!(controls.to_bytes().is_ok());
 
     let mut controls = Controls::new();
     controls.insert(
@@ -513,7 +525,10 @@ fn rejects_what_the_files_cannot_hold() {
 #[test]
 fn helpers_give_the_values_the_files_hold() {
     assert_eq!(Area::sized(10, 20, 30, 40), Area::new(10, 20, 40, 60));
-    assert_eq!(Area::sized(65000, 0, 1000, 1).right, u16::MAX);
+    assert_eq!(Area::sized(65000, 0, 1000, 1).bottom_right.x, u16::MAX);
+    assert_eq!(Area::new(10, 20, 40, 60).width(), 30);
+    assert_eq!(Area::new(10, 20, 40, 60).height(), 40);
+    assert_eq!(Area::new(40, 60, 10, 20).width(), 0);
     assert_eq!(degus_controls::rgb565(0x0408F8), 0x005F);
     assert_eq!(
         (0..=9).map(key::digit).collect::<Vec<_>>(),
@@ -662,6 +677,13 @@ fn rejects_files_it_cannot_read() {
         Controls::from_bytes(&empty.touch, &display),
         Err(Error::PageTable { page: 5 })
     );
+    // The header claims a highest page past the page table.
+    let mut display = empty.display.clone();
+    display[8..10].copy_from_slice(&4092u16.to_be_bytes());
+    assert_matches!(
+        Controls::from_bytes(&empty.touch, &display),
+        Err(Error::PageId { page: 4092 })
+    );
 
     let mut controls = Controls::new();
     controls
@@ -672,6 +694,12 @@ fn rejects_files_it_cannot_read() {
     assert_matches!(
         Controls::from_bytes(&touch[..touch.len() - 2], &empty.display),
         Err(Error::TouchFileEnd)
+    );
+    let mut far_page = touch.clone();
+    far_page[..2].copy_from_slice(&4092u16.to_be_bytes());
+    assert_matches!(
+        Controls::from_bytes(&far_page, &empty.display),
+        Err(Error::PageId { page: 4092 })
     );
     // A basic touch is one unit; here a unit starting with FE follows it.
     let basic = hex!(

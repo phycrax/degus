@@ -409,9 +409,8 @@ impl<'a> Checker<'a> {
                 }
                 self.area(at, "keyboard area", area);
                 let screen = self.bundle.device.screen;
-                let right = u32::from(position.x) + u32::from(area.right.saturating_sub(area.left));
-                let bottom =
-                    u32::from(position.y) + u32::from(area.bottom.saturating_sub(area.top));
+                let right = u32::from(position.x) + u32::from(area.width());
+                let bottom = u32::from(position.y) + u32::from(area.height());
                 if right > u32::from(screen.w) || bottom > u32::from(screen.h) {
                     self.error(
                         at.clone(),
@@ -536,17 +535,17 @@ impl<'a> Checker<'a> {
     /// Checks that `area`, named `key`, holds pixels and is on the screen.
     fn area(&mut self, at: &Location, key: &str, area: Area) {
         let screen = self.bundle.device.screen;
-        if area.right <= area.left || area.bottom <= area.top {
+        if area.width() == 0 || area.height() == 0 {
             self.error(at.clone(), format!("{key} is empty"));
-        } else if area.right > screen.w || area.bottom > screen.h {
+        } else if area.bottom_right.x > screen.w || area.bottom_right.y > screen.h {
             self.error(
                 at.clone(),
                 format!(
                     "{key} ({}, {}) {}x{} extends past the {screen} screen",
-                    area.left,
-                    area.top,
-                    area.right - area.left,
-                    area.bottom - area.top
+                    area.top_left.x,
+                    area.top_left.y,
+                    area.width(),
+                    area.height()
                 ),
             );
         }
@@ -587,10 +586,6 @@ fn controls_problem(error: degus_controls::Error) -> (Location, String) {
         E::Unit { page, index, unit } => (
             Location::Display { page, index },
             format!("unit {unit:?} must be ASCII and at most 11 bytes"),
-        ),
-        E::PageId { page } => (
-            Location::Page(page),
-            format!("page IDs must be below {MAX_PAGES}"),
         ),
         E::TooManyDisplays { page, count } => (
             Location::Page(page),

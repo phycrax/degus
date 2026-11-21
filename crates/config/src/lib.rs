@@ -14,7 +14,7 @@
 //!
 //! let config = Config {
 //!     rotation: Rotation::Deg90,
-//!     baud_divisor: Config::divisor_for_baud(115_200).unwrap(),
+//!     baud: 115_200,
 //!     brightness: 80,
 //!     ..Config::default()
 //! };
@@ -26,7 +26,7 @@ mod config;
 mod error;
 
 pub use config::{
-    Audio, BAUD_CLOCK, Buzzer, ClockOut, Config, FILE_LEN, FILE_NAME, Lcd, MAX_BAUD_DIVISOR,
-    NandSize, Rotation, TouchPanel,
+    Audio, BAUD_CLOCK, Buzzer, ClockOut, Config, FILE_LEN, FILE_NAME, Lcd, NandSize, Rotation,
+    TouchPanel,
 };
 pub use error::{Error, Result};

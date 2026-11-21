@@ -20,23 +20,19 @@ impl Point {
     }
 }
 
-/// A screen rectangle in pixels. Like the DGUS editor, `right` and `bottom`
-/// are `left + width` and `top + height`.
+/// A screen rectangle in pixels. Like the DGUS editor, `bottom_right` is
+/// `top_left` plus the size, so it lies just outside the rectangle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Area {
-    pub left: u16,
-    pub top: u16,
-    pub right: u16,
-    pub bottom: u16,
+    pub top_left: Point,
+    pub bottom_right: Point,
 }
 
 impl Area {
     pub const fn new(left: u16, top: u16, right: u16, bottom: u16) -> Self {
         Self {
-            left,
-            top,
-            right,
-            bottom,
+            top_left: Point::new(left, top),
+            bottom_right: Point::new(right, bottom),
         }
     }
 
@@ -45,18 +41,26 @@ impl Area {
         Self::new(x, y, x.saturating_add(w), y.saturating_add(h))
     }
 
-    pub const fn top_left(self) -> Point {
-        Point::new(self.left, self.top)
+    /// The width in pixels, or 0 when `bottom_right` is left of `top_left`.
+    pub const fn width(self) -> u16 {
+        self.bottom_right.x.saturating_sub(self.top_left.x)
+    }
+
+    /// The height in pixels, or 0 when `bottom_right` is above `top_left`.
+    pub const fn height(self) -> u16 {
+        self.bottom_right.y.saturating_sub(self.top_left.y)
     }
 
     pub(crate) fn write(self, record: &mut [u8], at: usize) {
-        Point::new(self.left, self.top).write(record, at);
-        Point::new(self.right, self.bottom).write(record, at + 4);
+        self.top_left.write(record, at);
+        self.bottom_right.write(record, at + 4);
     }
 
     pub(crate) fn read(record: &[u8], at: usize) -> Self {
-        let (start, end) = (Point::read(record, at), Point::read(record, at + 4));
-        Self::new(start.x, start.y, end.x, end.y)
+        Self {
+            top_left: Point::read(record, at),
+            bottom_right: Point::read(record, at + 4),
+        }
     }
 }
 

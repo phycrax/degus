@@ -7,7 +7,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// `index` counts a page's touch or display controls from 0.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("page {page}: page IDs must be below {MAX_PAGES}")]
+    #[error("the control files name page {page}; page IDs must be below {MAX_PAGES}")]
     PageId { page: u16 },
     #[error("page {page} has {count} display controls; at most 255 fit")]
     TooManyDisplays { page: u16, count: usize },

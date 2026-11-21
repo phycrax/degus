@@ -35,10 +35,7 @@ pub struct PageControls {
     pub display: Vec<Display>,
 }
 
-/// The touch (file 13) and display (file 14) controls of every page.
-///
-/// Pages without controls still count: the display file records the
-/// highest page ID, as the DGUS editor does for every page in the project.
+/// Touch (13) and display (14) controls of every page.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Controls {
     pages: BTreeMap<u16, PageControls>,
@@ -59,12 +56,22 @@ impl Controls {
     }
 
     /// The page with this ID, created empty if missing.
+    ///
+    /// # Panics
+    ///
+    /// If `id` is above [`MAX_PAGES`].
     pub fn page_mut(&mut self, id: u16) -> &mut PageControls {
+        assert_page_id(id);
         self.pages.entry(id).or_default()
     }
 
     /// Adds or replaces a page, returning the previous one.
+    ///
+    /// # Panics
+    ///
+    /// If `id` is above [`MAX_PAGES`].
     pub fn insert(&mut self, id: u16, page: PageControls) -> Option<PageControls> {
+        assert_page_id(id);
         self.pages.insert(id, page)
     }
 
@@ -117,6 +124,7 @@ impl Controls {
             }
             let record = rest.get(..len).ok_or(Error::TouchFileEnd)?;
             let (page, touch) = Touch::decode(record).ok_or(Error::TouchRecord { offset: at })?;
+            (page < MAX_PAGES).ok_or(Error::PageId { page })?;
             self.page_mut(page).touch.push(touch);
             at += len;
         }
@@ -128,6 +136,7 @@ impl Controls {
         }
         // A highest page of 0 is also what a file without pages records.
         let max_page = get_u16(file, 8);
+        (max_page < MAX_PAGES).ok_or(Error::PageId { page: max_page })?;
         if max_page > 0 {
             self.page_mut(max_page);
         }
@@ -151,9 +160,6 @@ impl Controls {
 
     /// Writes files 13 and 14.
     pub fn to_bytes(&self) -> Result<ControlFiles> {
-        if let Some(&page) = self.pages.keys().find(|&&id| id >= MAX_PAGES) {
-            return Err(Error::PageId { page });
-        }
         Ok(ControlFiles {
             touch: self.touch_file()?,
             display: self.display_file()?,
@@ -203,4 +209,11 @@ impl Controls {
         out.extend_from_slice(&DISPLAY_END);
         Ok(out)
     }
+}
+
+fn assert_page_id(id: u16) {
+    assert!(
+        id < MAX_PAGES,
+        "page {id}: page IDs must be below {MAX_PAGES}"
+    );
 }

@@ -60,7 +60,7 @@ fn every_block() -> Config {
         music_wae: 56,
         background_icl: 40,
         touch_report_div: 4,
-        baud_divisor: 0x0150,
+        baud: 9600,
         brightness: 80,
         standby_brightness: 10,
         standby_delay: 0x1234,
@@ -114,20 +114,44 @@ fn writes_every_block() {
 }
 
 #[test]
-fn converts_baud_rates() {
-    assert_eq!(Config::divisor_for_baud(115_200), Some(0x1C));
-    assert_eq!(Config::divisor_for_baud(9600), Some(0x0150));
-    assert_eq!(Config::divisor_for_baud(0), None);
-    assert_eq!(Config::divisor_for_baud(3000), None);
-    // 460800 baud is divisor 7 exactly; 921600 would be 3.5, and 4 is 12 % off.
-    assert_eq!(Config::divisor_for_baud(460_800), Some(7));
-    assert_eq!(Config::divisor_for_baud(921_600), None);
-    let config = Config {
-        baud_divisor: 13,
-        ..Config::default()
+fn writes_the_nearest_baud_divisor() {
+    let divisor = |baud: u32| {
+        Config {
+            baud,
+            ..Config::default()
+        }
+        .to_bytes()
+        .map(|file| u16::from_be_bytes([file[0x0A], file[0x0B]]))
     };
-    assert_eq!(config.baud(), 248_123);
-    assert_eq!(Config::divisor_for_baud(config.baud()), Some(13));
+    assert_eq!(divisor(115_200).unwrap(), 0x1C);
+    assert_eq!(divisor(9600).unwrap(), 0x0150);
+    assert_eq!(divisor(460_800).unwrap(), 7);
+    // 248123 baud, 0.75 % off.
+    assert_eq!(divisor(250_000).unwrap(), 13);
+    assert_matches!(divisor(0), Err(Error::Baud(0)));
+    // Below the slowest rate, divisor 0x3FF.
+    assert_matches!(divisor(3000), Err(Error::Baud(3000)));
+    // Divisor 3.5: 4 is 12.5 % off.
+    assert_matches!(divisor(921_600), Err(Error::Baud(921_600)));
+}
+
+#[test]
+fn reads_the_baud_a_divisor_gives() {
+    let mut file = Config::default().to_bytes().unwrap();
+    for (divisor, baud) in [(0x1C, 115_200), (13, 248_123), (0x03FF, 3153), (0, 0)] {
+        file[0x0A..0x0C].copy_from_slice(&u16::to_be_bytes(divisor));
+        assert_eq!(Config::from_bytes(&file).unwrap().baud, baud);
+    }
+}
+
+#[test]
+fn every_divisor_survives_a_read_and_write() {
+    let mut file = Config::default().to_bytes().unwrap();
+    for divisor in 1..=0x03FFu16 {
+        file[0x0A..0x0C].copy_from_slice(&divisor.to_be_bytes());
+        let config = Config::from_bytes(&file).unwrap();
+        assert_eq!(config.to_bytes().unwrap(), file, "divisor {divisor}");
+    }
 }
 
 #[test]

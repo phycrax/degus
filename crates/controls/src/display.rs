@@ -398,7 +398,7 @@ impl Display {
             Display::Text(text) => {
                 let mut r = header(TEXT, TEXT_LEN, text.sp, text.popup_menu);
                 put_u16(&mut r, 6, text.vp);
-                text.area.top_left().write(&mut r, 8);
+                text.area.top_left.write(&mut r, 8);
                 put_u16(&mut r, 12, text.color);
                 text.area.write(&mut r, 14);
                 put_u16(&mut r, 22, text.length);
