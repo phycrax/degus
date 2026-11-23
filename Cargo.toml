@@ -9,6 +9,8 @@ edition = "2024"
 [workspace.dependencies]
 degus-config = { path = "crates/config" }
 degus-controls = { path = "crates/controls" }
+degus-font = { path = "crates/font", default-features = false }
+degus-glyph = { path = "crates/glyph" }
 degus-icl = { path = "crates/icl" }
 degus-wae = { path = "crates/wae" }
 

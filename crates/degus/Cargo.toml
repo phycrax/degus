@@ -7,6 +7,12 @@ description = "Builds the DWIN_SET folder of DWIN T5L displays from Rust"
 [dependencies]
 degus-config.workspace = true
 degus-controls.workspace = true
+degus-font.workspace = true
 degus-icl.workspace = true
 degus-wae.workspace = true
 thiserror = "2.0.21"
+
+[features]
+default = ["render"]
+## Draws fonts from TrueType and OpenType fonts.
+render = ["degus-font/render"]

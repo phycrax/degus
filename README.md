@@ -69,9 +69,12 @@ The formats it writes, and reads back:
   return key code, basic touch, data input, variable icon, data variable,
   text display and progress bar. Other controls in files made by DWIN's
   tools are kept as they are;
-- panel configuration, `T5LCFG.CFG`.
+- panel configuration, `T5LCFG.CFG`;
+- font 0, the ASCII font data variables and text controls use, drawn from
+  a TrueType or OpenType font with hinting for 1-bit pixels. It goes in the
+  bundle's other files for now.
 
-Other DGUS controls and building fonts are TODO, tokens are welcome. A
+Other DGUS controls and the other fonts are TODO, tokens are welcome. A
 simulator that runs a built `DWIN_SET` is planned.
 
 ## With coding agents
@@ -93,7 +96,8 @@ either side.
 ## Crates
 
 The panel depends on `degus` alone, which re-exports the format crates as
-`degus::icl`, `degus::wae`, `degus::controls` and `degus::config`.
+`degus::icl`, `degus::wae`, `degus::controls`, `degus::config` and
+`degus::font`.
 
 | Crate | |
 |-------|---|
@@ -102,6 +106,8 @@ The panel depends on `degus` alone, which re-exports the format crates as
 | `degus-wae` | WAE audio libraries. |
 | `degus-controls` | Touch (13) and display (14) control files. |
 | `degus-config` | `T5LCFG.CFG`. |
+| `degus-font` | Font files: font 0 for now. |
+| `degus-glyph` | Draws TrueType and OpenType glyphs for bitmap fonts. |
 | `degus-codec` | UART frames, for either end of the link. `no_std`, for the firmware. |
 
 degus is an independent project, not affiliated with DWIN Technology.

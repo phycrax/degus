@@ -8,7 +8,9 @@
 //! including one made by DWIN's tools.
 //!
 //! The parts come from the format crates, re-exported here: [`config`],
-//! [`controls`], [`icl`] and [`wae`].
+//! [`controls`], [`font`], [`icl`] and [`wae`]. Font 0 goes in
+//! [`Bundle::files`] for now, as `0_DWIN_ASC.HZK`. Drawing fonts takes the
+//! `render` feature, on by default.
 //!
 //! ```no_run
 //! use degus::controls::{Area, KeyCode, Touch};
@@ -40,6 +42,7 @@ mod file;
 
 pub use degus_config as config;
 pub use degus_controls as controls;
+pub use degus_font as font;
 pub use degus_icl as icl;
 pub use degus_wae as wae;
 

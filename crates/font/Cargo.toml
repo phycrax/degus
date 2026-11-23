@@ -1,0 +1,14 @@
+[package]
+name = "degus-font"
+version.workspace = true
+edition.workspace = true
+description = "Builds and reads DWIN T5L font files"
+
+[dependencies]
+degus-glyph = { workspace = true, optional = true }
+thiserror = "2.0.21"
+
+[features]
+default = ["render"]
+## Draws fonts from TrueType and OpenType fonts, with degus-glyph.
+render = ["dep:degus-glyph"]
