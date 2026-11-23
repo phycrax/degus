@@ -6,12 +6,12 @@ description = "Builds and parses the UART frames of DWIN T5L displays"
 categories = ["embedded", "no-std", "encoding"]
 
 [dependencies]
-crc = "3.4.0"
+crc.workspace = true
 defmt = { version = "1.0.1", optional = true }
-thiserror = { version = "2.0.21", default-features = false }
+thiserror.workspace = true
 
 [dev-dependencies]
-hex-literal = "1.1.0"
+hex-literal.workspace = true
 
 [features]
 ## Derives `defmt::Format` for the public types.

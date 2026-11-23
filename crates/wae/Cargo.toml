@@ -5,10 +5,10 @@ edition.workspace = true
 description = "Builds DWIN T5L WAE (DGUS_2) audio libraries"
 
 [dependencies]
-crc = "3.4.0"
+crc.workspace = true
 rubato = "5.0.1"
 symphonia = { version = "0.6.1", default-features = false, features = ["wav", "pcm", "mp3", "flac", "ogg", "vorbis", "adpcm"] }
-thiserror = "2.0.21"
+thiserror = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 hound = "3.5.1"

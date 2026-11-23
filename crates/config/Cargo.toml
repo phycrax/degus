@@ -5,7 +5,7 @@ edition.workspace = true
 description = "Builds DWIN T5L hardware configuration files (T5LCFG.CFG)"
 
 [dependencies]
-thiserror = "2.0.21"
+thiserror = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
-hex-literal = "1.1.0"
+hex-literal.workspace = true

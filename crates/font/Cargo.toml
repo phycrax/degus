@@ -6,7 +6,7 @@ description = "Builds and reads DWIN T5L font files"
 
 [dependencies]
 degus-glyph = { workspace = true, optional = true }
-thiserror = "2.0.21"
+thiserror = { workspace = true, features = ["std"] }
 
 [features]
 default = ["render"]

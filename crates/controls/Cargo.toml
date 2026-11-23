@@ -6,7 +6,7 @@ description = "Builds DWIN T5L touch (13) and display variable (14) configuratio
 
 [dependencies]
 num_enum = "0.7.6"
-thiserror = "2.0.21"
+thiserror = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
-hex-literal = "1.1.0"
+hex-literal.workspace = true

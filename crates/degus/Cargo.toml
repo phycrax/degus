@@ -10,7 +10,7 @@ degus-controls.workspace = true
 degus-font.workspace = true
 degus-icl.workspace = true
 degus-wae.workspace = true
-thiserror = "2.0.21"
+thiserror = { workspace = true, features = ["std"] }
 
 [features]
 default = ["render"]

@@ -7,4 +7,4 @@ description = "Renders TrueType and OpenType glyphs into coverage masks for bitm
 [dependencies]
 ab_glyph_rasterizer = "0.1.10"
 skrifa = "0.50.0"
-thiserror = "2.0.21"
+thiserror = { workspace = true, features = ["std"] }
