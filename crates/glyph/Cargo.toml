@@ -1,0 +1,10 @@
+[package]
+name = "degus-glyph"
+version.workspace = true
+edition.workspace = true
+description = "Renders TrueType and OpenType glyphs into coverage masks for bitmap fonts"
+
+[dependencies]
+ab_glyph_rasterizer = "0.1.10"
+skrifa = "0.50.0"
+thiserror = "2.0.21"
