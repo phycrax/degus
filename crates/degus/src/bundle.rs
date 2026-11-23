@@ -4,12 +4,15 @@ use std::path::Path;
 
 use degus_config::Config;
 use degus_controls::Controls;
+use degus_font::{FONT0_LEN, Font0};
 use degus_icl::{Chip, Icl};
 use degus_wae::Wae;
 
 use crate::check::Diagnostic;
 use crate::error::{Error, Result, io_error};
-use crate::file::{CONFIG_FILE, DISPLAY_FILE, File, Role, TOUCH_FILE, icl_name, number, wae_name};
+use crate::file::{
+    CONFIG_FILE, DISPLAY_FILE, FONT0_FILE, File, Role, TOUCH_FILE, icl_name, number, wae_name,
+};
 
 /// The folder the display downloads from the root of its SD card.
 pub const FOLDER: &str = "DWIN_SET";
@@ -66,12 +69,16 @@ pub struct Bundle {
     pub config: Option<Config>,
     /// Files 13 and 14: the touch and display controls of every page.
     pub controls: Controls,
+    /// Font 0, written as `0_DWIN_ASC.HZK`. Without it, the display keeps
+    /// the font 0 it has: the one it came with, unless a download replaced
+    /// it.
+    pub font0: Option<Font0>,
     /// Icon libraries by file number, written as `<n>.icl`.
     pub icls: BTreeMap<u8, Icl>,
     /// Audio libraries by file number, written as `<n>.wae`.
     pub waes: BTreeMap<u8, Wae>,
-    /// Any other files, such as fonts, by name. They are written as they
-    /// are.
+    /// Any other files, such as the other fonts, by name. They are written
+    /// as they are.
     pub files: BTreeMap<String, Vec<u8>>,
 }
 
@@ -91,6 +98,7 @@ impl Bundle {
             device,
             config: None,
             controls: Controls::new(),
+            font0: None,
             icls: BTreeMap::new(),
             waes: BTreeMap::new(),
             files: BTreeMap::new(),
@@ -127,6 +135,11 @@ impl Bundle {
     /// - files 13 and 14 ending in `.bin` are the controls;
     /// - files ending in `.icl` and `.wae` are the libraries of their file
     ///   numbers, which are written back as `<n>.icl` and `<n>.wae`;
+    /// - file 0 ending in `.hzk`, `.dzk` or `.bin` is font 0 when it is
+    ///   [`FONT0_LEN`](degus_font::FONT0_LEN) bytes long, and is written
+    ///   back as `0_DWIN_ASC.HZK`. Font 0 has no header, so a file 0 of
+    ///   another length goes in [`Bundle::files`], and
+    ///   [`Bundle::check`] warns about it;
     /// - the other files go in [`Bundle::files`].
     ///
     /// Names are matched ignoring case. Fails on two files with the same
@@ -157,6 +170,10 @@ impl Bundle {
                 Role::Config => bundle.config = Some(Config::from_bytes(&file.bytes)?),
                 Role::Touch => touch = Some(file.bytes),
                 Role::Display => display = Some(file.bytes),
+                Role::Font0 if file.bytes.len() == FONT0_LEN => {
+                    let font = Font0::from_bytes(&file.bytes).expect("font 0's length reads");
+                    bundle.font0 = Some(font);
+                }
                 Role::Icl(number) => {
                     let icl = Icl::from_bytes(&file.bytes).map_err(|source| Error::Icl {
                         file: number,
@@ -171,7 +188,7 @@ impl Bundle {
                     })?;
                     bundle.waes.insert(number, wae);
                 }
-                Role::Other => {
+                Role::Font0 | Role::Other => {
                     bundle.files.insert(file.name, file.bytes);
                 }
             }
@@ -199,6 +216,9 @@ impl Bundle {
         let controls = self.controls.to_bytes()?;
         files.push(File::new(TOUCH_FILE, controls.touch));
         files.push(File::new(DISPLAY_FILE, controls.display));
+        if let Some(font) = &self.font0 {
+            files.push(File::new(FONT0_FILE, font.to_bytes()));
+        }
         for (&file, icl) in &self.icls {
             let bytes = icl
                 .to_bytes(file)

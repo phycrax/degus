@@ -3,9 +3,10 @@ use std::path::PathBuf;
 
 use degus::config::{Config, Lcd};
 use degus::controls::{
-    Area, DataInput, DataVar, IconVar, KeyCode, KeyTarget, Keyboard, Point, ProgressBar, TextVar,
-    Touch, TouchAction, key,
+    Area, DataInput, DataType, DataVar, Encoding, IconVar, KeyCode, KeyTarget, Keyboard, Point,
+    ProgressBar, TextVar, Touch, TouchAction, key,
 };
+use degus::font::{Bitmap, FONT0_LEN, Font0};
 use degus::icl::image::{DynamicImage, Rgb, RgbImage};
 use degus::icl::{Chip, Icl, IclBuilder, IclOptions, IconSource};
 use degus::wae::{SampleFormat, Wae};
@@ -21,6 +22,19 @@ fn icl(icons: &[(u16, u32, u32)]) -> Icl {
         builder.insert(id, IconSource::Image(DynamicImage::ImageRgb8(image)));
     }
     builder.build().unwrap()
+}
+
+/// A font 0 with a pixel in every glyph, so that every character is drawn.
+fn font0() -> Font0 {
+    let mut font = Font0::new();
+    for width in 4..=64 {
+        for code in 0..=127 {
+            let mut glyph = Bitmap::new(width.into(), 2 * u16::from(width));
+            glyph.set(0, 0, true);
+            font.set(width, code, glyph).unwrap();
+        }
+    }
+    font
 }
 
 fn wae(ids: &[u16]) -> Wae {
@@ -42,9 +56,7 @@ fn panel() -> Bundle {
     bundle.icls.insert(32, icl(&[(0, 800, 480), (1, 800, 480)]));
     bundle.icls.insert(40, icl(&[(0, 64, 64), (1, 64, 64)]));
     bundle.waes.insert(48, wae(&[0]));
-    bundle
-        .files
-        .insert("0_DWIN_ASC.HZK".into(), vec![0xAA; 1000]);
+    bundle.font0 = Some(font0());
 
     let home = bundle.controls.page_mut(0);
     home.touch.push(Touch::new(
@@ -464,6 +476,7 @@ fn reads_files_as_the_display_does() {
             "13TouchFile.bin" => "13触控配置文件.bin".into(),
             "32.icl" => "32_backgrounds.ICL".into(),
             "T5LCFG.CFG" => "T5LCFG_800480.CFG".into(),
+            "0_DWIN_ASC.HZK" => "00_ascii.DZK".into(),
             _ => continue,
         };
     }
@@ -473,10 +486,11 @@ fn reads_files_as_the_display_does() {
     assert_eq!(read.config, bundle.config);
     assert_eq!(read.controls, bundle.controls);
     assert_eq!(read.icls, bundle.icls);
+    assert_eq!(read.font0, bundle.font0);
     // ICL numbers are bytes, so 300.icl stays a plain file.
     assert_eq!(
         read.files.keys().collect::<Vec<_>>(),
-        ["0_DWIN_ASC.HZK", "22_Config.bin", "300.icl"]
+        ["22_Config.bin", "300.icl"]
     );
 
     // Without file 13, the pages have no touch controls.
@@ -488,6 +502,164 @@ fn reads_files_as_the_display_does() {
     let read = Bundle::from_files(files, bundle.device).unwrap();
     assert!(read.controls.iter().all(|(_, page)| page.touch.is_empty()));
     assert_eq!(read.controls.get(0).unwrap().display.len(), 1);
+}
+
+#[test]
+fn reads_font_0_by_its_number_and_length() {
+    let device = Device::new(SCREEN);
+    let font = font0();
+    let read = Bundle::from_files([File::new("0.bin", font.to_bytes())], device).unwrap();
+    assert_eq!(read.font0.as_ref(), Some(&font));
+    assert!(read.files.is_empty());
+    // Written back under DWIN's name, first: it is file 0.
+    assert_eq!(read.to_files().unwrap()[0].name, "0_DWIN_ASC.HZK");
+
+    // Font 0 has no header, so a file 0 of another length stays as it is,
+    // and the check says why.
+    let short = Bundle::from_files([File::new("0_DWIN_ASC.HZK", vec![0; 1000])], device).unwrap();
+    assert_eq!(short.font0, None);
+    assert_eq!(short.files["0_DWIN_ASC.HZK"], vec![0; 1000]);
+    assert_eq!(
+        check(&short),
+        [format!(
+            "warning: 0_DWIN_ASC.HZK: the display reads file 0 as font 0, but this is 1000 \
+             bytes, not the {FONT0_LEN} of font 0"
+        )]
+    );
+
+    // Other files numbered 0 are not fonts.
+    let logo = Bundle::from_files([File::new("0_logo.png", vec![1])], device).unwrap();
+    assert_eq!(logo.font0, None);
+    assert_eq!(check(&logo), Vec::<String>::new());
+
+    let two = [
+        File::new("0_DWIN_ASC.HZK", font.to_bytes()),
+        File::new("0.bin", vec![1]),
+    ];
+    assert!(matches!(
+        Bundle::from_files(two, device),
+        Err(Error::Duplicate { .. })
+    ));
+}
+
+#[test]
+fn checks_the_sizes_controls_take_from_font_0() {
+    let mut bundle = panel();
+    let text = |encoding, ascii_font, font, font_width| TextVar {
+        area: Area::sized(10, 300, 200, 40),
+        encoding,
+        ascii_font,
+        font,
+        font_width,
+        font_height: font_width,
+        ..TextVar::default()
+    };
+    let home = bundle.controls.page_mut(0);
+    home.display.push(
+        DataVar {
+            position: Point::new(10, 10),
+            font_size: 3,
+            ..DataVar::default()
+        }
+        .into(),
+    );
+    // Only font 0 is checked.
+    home.display.push(
+        DataVar {
+            position: Point::new(10, 10),
+            font: 2,
+            font_size: 3,
+            ..DataVar::default()
+        }
+        .into(),
+    );
+    home.display.push(text(Encoding::Ascii, 0, 0, 65).into());
+    home.display.push(text(Encoding::Ascii, 0, 3, 65).into());
+    // GB2312 draws ASCII at half the width: 65 here, 12 next.
+    home.display.push(text(Encoding::Gb2312, 0, 5, 130).into());
+    home.display.push(text(Encoding::Gb2312, 0, 5, 24).into());
+    home.display.push(text(Encoding::Unicode, 0, 0, 16).into());
+    home.display.push(text(Encoding::Gbk, 0, 0, 16).into());
+    if let TouchAction::DataInput(input) = &mut bundle.controls.page_mut(1).touch[0].action {
+        input.font_size = 70;
+    }
+
+    assert_eq!(
+        check(&bundle),
+        [
+            "error: page 0, display control 1: font_size 3 is not a width of font 0, which \
+             has 4 to 64",
+            "error: page 0, display control 3: font_width 65 is not a width of font 0, which \
+             has 4 to 64",
+            "error: page 0, display control 5: font_width 130 draws ASCII from font 0 at half \
+             of it, 65, which is not a width of font 0, which has 4 to 64",
+            "warning: page 0, display control 7: font is 0, but font 0 holds only ASCII: it \
+             has no Unicode characters",
+            "warning: page 0, display control 8: font is 0, but font 0 holds only ASCII: it \
+             has no GBK characters",
+            "error: page 1, touch control 0: font_size 70 is not a width of font 0, which has \
+             4 to 64",
+        ]
+    );
+}
+
+#[test]
+fn checks_that_the_bundle_s_font_0_draws_what_numbers_need() {
+    let mut bundle = panel();
+    let font = bundle.font0.as_mut().unwrap();
+    for code in *b"7-g" {
+        font.set(12, code, Bitmap::new(12, 24)).unwrap();
+    }
+    font.set(16, b'*', Bitmap::new(16, 32)).unwrap();
+    let number = |data_type, decimal_digits, unit: &str, font_size| DataVar {
+        position: Point::new(10, 10),
+        data_type,
+        decimal_digits,
+        unit: unit.into(),
+        font_size,
+        ..DataVar::default()
+    };
+    let home = bundle.controls.page_mut(0);
+    home.display.push(number(DataType::U16, 0, "kg", 12).into());
+    home.display.push(number(DataType::I16, 1, "", 12).into());
+    home.display.push(number(DataType::I16, 1, "kg", 13).into());
+    if let TouchAction::DataInput(input) = &mut bundle.controls.page_mut(1).touch[0].action {
+        input.masked = true;
+    }
+
+    assert_eq!(
+        check(&bundle),
+        [
+            "warning: page 0, display control 1: the bundle's font 0 draws nothing for '7', \
+             'g' at width 12",
+            "warning: page 0, display control 2: the bundle's font 0 draws nothing for '-', \
+             '7' at width 12",
+            "warning: page 1, touch control 0: the bundle's font 0 draws nothing for '*' at \
+             width 16",
+        ]
+    );
+
+    // The font 0 a display comes with has every character.
+    bundle.font0 = None;
+    assert_eq!(check(&bundle), Vec::<String>::new());
+}
+
+#[test]
+fn font_0_takes_files_0_to_11() {
+    let mut bundle = panel();
+    bundle.files.insert("11_data.bin".into(), vec![1]);
+    bundle.files.insert("12_data.bin".into(), vec![1]);
+    let diagnostics = check(&bundle);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+    assert!(
+        diagnostics[0].starts_with("error: 11_data.bin: overlaps 0_DWIN_ASC.HZK in flash"),
+        "{diagnostics:#?}"
+    );
+    assert!(matches!(
+        bundle.to_files(),
+        Err(Error::FlashOverlap { first, second })
+            if first == "0_DWIN_ASC.HZK" && second == "11_data.bin"
+    ));
 }
 
 #[test]

@@ -2,14 +2,16 @@ use std::collections::BTreeSet;
 use std::fmt;
 
 use degus_controls::{
-    Area, Display, IconVar, Keyboard, MAX_DISPLAYS_PER_PAGE, MAX_PAGES, Point, Touch, TouchAction,
-    key,
+    Area, DataInput, DataType, DataVar, Display, Encoding, IconVar, InputDataType, Keyboard,
+    MAX_DISPLAYS_PER_PAGE, MAX_PAGES, Point, TextVar, Touch, TouchAction, key,
 };
+use degus_font::{FONT0_LEN, FONT0_WIDTHS};
 use degus_icl::Icl;
 
 use crate::bundle::{Bundle, LayoutProblem, layout_problems};
 use crate::file::{
-    CONFIG_FILE, DISPLAY_FILE, TOUCH_FILE, icl_name, is_config_file, number, wae_name,
+    CONFIG_FILE, DISPLAY_FILE, FONT0_FILE, Role, TOUCH_FILE, icl_name, is_config_file, number,
+    wae_name,
 };
 
 /// The background ICL of a display whose configuration names no other.
@@ -180,6 +182,9 @@ impl<'a> Checker<'a> {
                 self.error(location, message);
             }
         }
+        if bundle.font0.is_some() {
+            files.push((FONT0_FILE.to_owned(), FONT0_LEN));
+        }
         for (&file, icl) in &bundle.icls {
             match icl.to_bytes(file) {
                 Ok(bytes) => files.push((icl_name(file), bytes.len())),
@@ -201,6 +206,16 @@ impl<'a> Checker<'a> {
                     format!(
                         "the display would read it as well as the {} the bundle writes",
                         CONFIG_FILE
+                    ),
+                );
+            }
+            if Role::of(name) == Role::Font0 && bytes.len() != FONT0_LEN {
+                self.warning(
+                    Location::File(name.clone()),
+                    format!(
+                        "the display reads file 0 as font 0, but this is {} bytes, not the \
+                         {FONT0_LEN} of font 0",
+                        bytes.len()
                     ),
                 );
             }
@@ -375,6 +390,7 @@ impl<'a> Checker<'a> {
         let TouchAction::DataInput(input) = &touch.action else {
             return;
         };
+        self.input_font(at, input);
         if let Some(limits) = &input.limits
             && limits.start() > limits.end()
         {
@@ -452,8 +468,14 @@ impl<'a> Checker<'a> {
                 self.icon(at, icon);
                 self.point(at, "position", icon.position);
             }
-            Display::Data(data) => self.point(at, "position", data.position),
-            Display::Text(text) => self.area(at, "area", text.area),
+            Display::Data(data) => {
+                self.point(at, "position", data.position);
+                self.data_font(at, data);
+            }
+            Display::Text(text) => {
+                self.area(at, "area", text.area);
+                self.text_font(at, text);
+            }
             Display::Progress(bar) => {
                 if bar.val_min >= bar.val_max {
                     self.error(
@@ -534,6 +556,114 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Checks the font of a data variable: font 0 must have its size, and
+    /// draw its digits, sign, decimal point and unit.
+    fn data_font(&mut self, at: &Location, data: &DataVar) {
+        let signed = matches!(
+            data.data_type,
+            DataType::I16 | DataType::I32 | DataType::I64 | DataType::F32 | DataType::F64
+        );
+        let mut chars = number_chars(signed, data.decimal_digits);
+        chars.extend(data.unit.bytes());
+        self.number_font(at, data.font, data.font_size, &chars);
+    }
+
+    /// Checks the font of a data input as [`Checker::data_font`] does. A
+    /// masked input draws only `*`.
+    fn input_font(&mut self, at: &Location, input: &DataInput) {
+        let chars = if input.masked {
+            vec![b'*']
+        } else {
+            let signed = matches!(
+                input.data_type,
+                InputDataType::I16 | InputDataType::I32 | InputDataType::I64 | InputDataType::Float
+            );
+            number_chars(signed, input.decimal_digits)
+        };
+        self.number_font(at, input.font, input.font_size, &chars);
+    }
+
+    /// Checks a number drawn with `font` at `width` that needs `chars`.
+    /// Only font 0 is checked, the one font whose layout degus knows.
+    fn number_font(&mut self, at: &Location, font: u8, width: u8, chars: &[u8]) {
+        if font != 0 {
+            return;
+        }
+        if !FONT0_WIDTHS.contains(&width) {
+            self.error(
+                at.clone(),
+                format!("font_size {width} is not a width of font 0, {FONT0_RANGE}"),
+            );
+            return;
+        }
+        let Some(font0) = &self.bundle.font0 else {
+            // The font 0 a display comes with has all of ASCII.
+            return;
+        };
+        let mut missing: Vec<u8> = chars
+            .iter()
+            .copied()
+            .filter(|c| c.is_ascii_graphic())
+            .filter(|&c| font0.glyph(width, c).is_some_and(|glyph| glyph.is_blank()))
+            .collect();
+        missing.sort_unstable();
+        missing.dedup();
+        if !missing.is_empty() {
+            let list = missing
+                .iter()
+                .map(|&c| format!("{:?}", char::from(c)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.warning(
+                at.clone(),
+                format!("the bundle's font 0 draws nothing for {list} at width {width}"),
+            );
+        }
+    }
+
+    /// Checks the fonts of a text display that uses font 0. The text is
+    /// only known at run time, so its characters are not checked.
+    fn text_font(&mut self, at: &Location, text: &TextVar) {
+        let two_bytes = match text.encoding {
+            Encoding::Ascii => {
+                if text.font == 0 && !FONT0_WIDTHS.contains(&text.font_width) {
+                    self.error(
+                        at.clone(),
+                        format!(
+                            "font_width {} is not a width of font 0, {FONT0_RANGE}",
+                            text.font_width
+                        ),
+                    );
+                }
+                return;
+            }
+            Encoding::Gb2312 | Encoding::Gbk | Encoding::Big5 | Encoding::ShiftJis => true,
+            Encoding::Unicode => false,
+        };
+        // The two-byte encodings draw ASCII from ascii_font at half the
+        // width (DWIN's guide, 7.13.1).
+        let ascii = text.font_width / 2;
+        if two_bytes && text.ascii_font == 0 && !FONT0_WIDTHS.contains(&ascii) {
+            self.error(
+                at.clone(),
+                format!(
+                    "font_width {} draws ASCII from font 0 at half of it, {ascii}, which is \
+                     not a width of font 0, {FONT0_RANGE}",
+                    text.font_width
+                ),
+            );
+        }
+        if text.font == 0 {
+            self.warning(
+                at.clone(),
+                format!(
+                    "font is 0, but font 0 holds only ASCII: it has no {} characters",
+                    encoding_name(text.encoding)
+                ),
+            );
+        }
+    }
+
     /// Checks that `area`, named `key`, holds pixels and is on the screen.
     fn area(&mut self, at: &Location, key: &str, area: Area) {
         let screen = self.bundle.device.screen;
@@ -565,6 +695,46 @@ impl<'a> Checker<'a> {
                 ),
             );
         }
+    }
+}
+
+/// The widths of font 0, for messages: `which has 4 to 64`.
+const FONT0_RANGE: Font0Range = Font0Range;
+
+struct Font0Range;
+
+impl fmt::Display for Font0Range {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "which has {} to {}",
+            FONT0_WIDTHS.start(),
+            FONT0_WIDTHS.end()
+        )
+    }
+}
+
+/// The characters a number needs: digits, and a sign and a decimal point
+/// if it has them.
+fn number_chars(signed: bool, decimal_digits: u8) -> Vec<u8> {
+    let mut chars = b"0123456789".to_vec();
+    if signed {
+        chars.push(b'-');
+    }
+    if decimal_digits > 0 {
+        chars.push(b'.');
+    }
+    chars
+}
+
+fn encoding_name(encoding: Encoding) -> &'static str {
+    match encoding {
+        Encoding::Ascii => "8-bit",
+        Encoding::Gb2312 => "GB2312",
+        Encoding::Gbk => "GBK",
+        Encoding::Big5 => "BIG5",
+        Encoding::ShiftJis => "Shift JIS",
+        Encoding::Unicode => "Unicode",
     }
 }
 

@@ -8,8 +8,7 @@
 //! including one made by DWIN's tools.
 //!
 //! The parts come from the format crates, re-exported here: [`config`],
-//! [`controls`], [`font`], [`icl`] and [`wae`]. Font 0 goes in
-//! [`Bundle::files`] for now, as `0_DWIN_ASC.HZK`. Drawing fonts takes the
+//! [`controls`], [`font`], [`icl`] and [`wae`]. Drawing fonts takes the
 //! `render` feature, on by default.
 //!
 //! ```no_run
@@ -49,4 +48,4 @@ pub use degus_wae as wae;
 pub use bundle::{Bundle, Device, FOLDER, SLOT_SIZE, Size, Written};
 pub use check::{Diagnostic, Location, Severity};
 pub use error::{Error, Result};
-pub use file::{CONFIG_FILE, DISPLAY_FILE, File, TOUCH_FILE};
+pub use file::{CONFIG_FILE, DISPLAY_FILE, FONT0_FILE, File, TOUCH_FILE};

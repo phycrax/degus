@@ -12,6 +12,12 @@ pub const TOUCH_FILE: &str = "13TouchFile.bin";
 /// The display control file a bundle writes, named as DWIN's tools name
 /// it. The display reads file 14 ending in `.bin` as its display controls.
 pub const DISPLAY_FILE: &str = "14ShowFile.bin";
+/// The font 0 file a bundle writes, named as DWIN's tools name it. The
+/// display stores file 0 at the start of its flash, where font 0 lives.
+pub const FONT0_FILE: &str = "0_DWIN_ASC.HZK";
+
+/// The endings of font files, which the display takes for any font ID.
+const FONT_ENDINGS: [&str; 3] = [".hzk", ".dzk", ".bin"];
 
 const TOUCH_NUMBER: u16 = 13;
 const DISPLAY_NUMBER: u16 = 14;
@@ -22,6 +28,9 @@ pub(crate) enum Role {
     Config,
     Touch,
     Display,
+    /// File 0 ending as a font file does. Font 0 has no header, so whether
+    /// it is one is up to its length.
+    Font0,
     Icl(u8),
     Wae(u8),
     Other,
@@ -43,6 +52,8 @@ impl Role {
             Role::Touch
         } else if lower.ends_with(".bin") && number == Some(DISPLAY_NUMBER) {
             Role::Display
+        } else if number == Some(0) && FONT_ENDINGS.iter().any(|end| lower.ends_with(end)) {
+            Role::Font0
         } else {
             Role::Other
         }

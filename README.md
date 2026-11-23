@@ -52,11 +52,12 @@ writes to an SD card and download it to the display.
 
 - A `Bundle` holds everything in `DWIN_SET`: the configuration, the touch
   and display controls of every page, the icon and audio libraries by file
-  number, and any other files, such as fonts.
+  number, font 0, and any other files, such as the other fonts.
 - `Bundle::check` reports problems by location: controls off the screen,
   icons and libraries a control names but the bundle lacks, pages without
   a background, icons too large for the chip, files that run into each
-  other in flash, and more.
+  other in flash, font 0 sizes that controls ask for but font 0 lacks,
+  digits the bundle's font 0 doesn't draw, and more.
 - `Bundle::write` checks the bundle, refuses it on errors and writes the
   folder.
 - `Bundle::read` reads a folder back, including one made by DWIN's tools.
@@ -71,8 +72,7 @@ The formats it writes, and reads back:
   tools are kept as they are;
 - panel configuration, `T5LCFG.CFG`;
 - font 0, the ASCII font data variables and text controls use, drawn from
-  a TrueType or OpenType font with hinting for 1-bit pixels. It goes in the
-  bundle's other files for now.
+  a TrueType or OpenType font with hinting for 1-bit pixels.
 
 Other DGUS controls and the other fonts are TODO, tokens are welcome. A
 simulator that runs a built `DWIN_SET` is planned.
