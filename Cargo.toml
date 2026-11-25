@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "examples/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,13 +10,19 @@ edition = "2024"
 degus-codec = { path = "crates/codec" }
 degus-config = { path = "crates/config" }
 degus-controls = { path = "crates/controls" }
+degus-driver = { path = "crates/driver" }
 degus-font = { path = "crates/font", default-features = false }
 degus-glyph = { path = "crates/glyph" }
 degus-icl = { path = "crates/icl" }
+degus-serde = { path = "crates/serde" }
 degus-wae = { path = "crates/wae" }
 
 crc = "3.4.0"
+defmt = "1.0.1"
+embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "21d9a9a798ac414d2e5f3b6fb8174fed4c0f5db3" }
+embedded-io-async = "0.7.0"
 hex-literal = "1.1.0"
+serde = { version = "1.0.228", default-features = false }
 thiserror = { version = "2.0.21", default-features = false }
 
 [profile.dev.package."*"]

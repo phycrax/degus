@@ -26,13 +26,13 @@ every change shows up in a diff.
 A typical product has three crates:
 
 - **`ui`**, shared by the other two: page IDs, VP addresses, icon IDs and
-  the types behind them. It needs no dependencies, not even degus, so it
-  builds for the firmware too.
+  the types behind them. It needs no degus crate, at most `serde` for the
+  types the firmware sends, so it builds for the firmware too.
 - **The panel**, a program depending on `ui` and `degus`. It builds the
   icon and audio libraries from images and sounds, places the controls on
   the pages, checks the result and writes `DWIN_SET`.
-- **The firmware**, depending on `ui` and `degus-codec`, which builds and
-  parses the frames the display speaks on its UART.
+- **The firmware**, depending on `ui` and `degus-driver`, which talks to
+  the display over its UART.
 
 Because both sides take their VPs from `ui`, the panel and the firmware
 cannot disagree about them.
@@ -77,6 +77,25 @@ The formats it writes, and reads back:
 Other DGUS controls and the other fonts are TODO, tokens are welcome. A
 simulator that runs a built `DWIN_SET` is planned.
 
+## Talking to the display
+
+`degus-driver` is the firmware's side of the UART link, for async firmware
+with `embassy-sync` and `embedded-io-async`. It is `no_std`.
+
+- `Display::write` writes a value to a VP and waits for the display's
+  acknowledgement; `Display::read` reads a value back. Values are encoded
+  with serde: numbers big-endian, `bool` and unit enum variants as a word,
+  and a struct as its fields over the VPs that follow.
+- A `Runner` reads the UART, matches each answer to the request waiting
+  for it, and hands the display's uploads, such as a VP a touch control
+  changed, to a router.
+- A request can be cancelled, as by a timeout, and the next one won't take
+  its answer.
+
+`examples/fan` drives a panel from a PC's serial port. Underneath,
+`degus-serde` encodes the values and `degus-codec` the frames; both work
+on their own, without the driver.
+
 ## With coding agents
 
 degus is made so agents can build the panel along with the firmware. To
@@ -97,7 +116,7 @@ either side.
 
 The panel depends on `degus` alone, which re-exports the format crates as
 `degus::icl`, `degus::wae`, `degus::controls`, `degus::config` and
-`degus::font`.
+`degus::font`. The firmware depends on `degus-driver`.
 
 | Crate | |
 |-------|---|
@@ -108,6 +127,8 @@ The panel depends on `degus` alone, which re-exports the format crates as
 | `degus-config` | `T5LCFG.CFG`. |
 | `degus-font` | Font files: font 0 for now. |
 | `degus-glyph` | Draws TrueType and OpenType glyphs for bitmap fonts. |
-| `degus-codec` | UART frames, for either end of the link. `no_std`, for the firmware. |
+| `degus-driver` | The firmware's side of the UART link, async. `no_std`. |
+| `degus-serde` | VP values, with serde. `no_std`. |
+| `degus-codec` | UART frames, for either end of the link. `no_std`. |
 
 degus is an independent project, not affiliated with DWIN Technology.

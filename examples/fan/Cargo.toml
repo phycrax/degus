@@ -1,0 +1,17 @@
+[package]
+name = "fan"
+version.workspace = true
+edition.workspace = true
+description = "A fan's display panel, driven from a PC's serial port with degus-driver"
+publish = false
+
+[dependencies]
+critical-section = { version = "1.2.0", features = ["std"] }
+degus-driver.workspace = true
+embassy-executor = { version = "0.10.0", features = ["executor-thread", "platform-std"] }
+embassy-futures = "0.1.2"
+embassy-sync.workspace = true
+embedded-io-async = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["derive"] }
+serialport = "4.9.0"
+static_cell = "2.1.1"

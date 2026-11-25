@@ -1,0 +1,27 @@
+[package]
+name = "degus-driver"
+version.workspace = true
+edition.workspace = true
+description = "Talks to DWIN T5L displays over their UART from async firmware"
+categories = ["embedded", "no-std"]
+
+[dependencies]
+degus-codec.workspace = true
+degus-serde.workspace = true
+defmt = { workspace = true, optional = true }
+embassy-sync.workspace = true
+embedded-io-async.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+embassy-futures = "0.1.2"
+
+[features]
+## Derives `defmt::Format` for the public types.
+defmt = [
+    "dep:defmt",
+    "degus-codec/defmt",
+    "degus-serde/defmt",
+    "embedded-io-async/defmt",
+]

@@ -6,14 +6,14 @@ description = "Encodes and decodes the values DWIN T5L displays hold in their VP
 categories = ["embedded", "no-std", "encoding"]
 
 [dependencies]
-defmt = { version = "1.0.1", optional = true }
-serde = { version = "1.0.228", default-features = false }
+defmt = { workspace = true, optional = true }
+serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
 degus-codec.workspace = true
 hex-literal.workspace = true
-serde = { version = "1.0.228", features = ["derive"] }
+serde = { workspace = true, features = ["derive", "std"] }
 
 [features]
 ## Derives `defmt::Format` for the errors.
