@@ -516,14 +516,17 @@ fn draws_boxes_for_fonts_it_does_not_have() {
         (61..67).collect::<Vec<_>>()
     );
 
-    // Without font 0, font 0 draws as boxes too, and that is said once.
+    // Without font 0, font 0 text is not drawn, and that is said once.
     let mut set = panel();
     set.font0 = None;
     let mut sim = Sim::new(set);
+    sim.write_vp(0x1001, &[235]).unwrap();
     sim.show_page(1);
     sim.show_page(0);
     let notes = notes(&mut sim);
     assert_eq!(notes.iter().filter(|n| n.contains("no font 0")).count(), 1);
+    let fb = sim.render();
+    assert_eq!(lit_columns(&fb, 10, 50, 45, WHITE), Vec::<u32>::new());
 }
 
 #[test]

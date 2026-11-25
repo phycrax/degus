@@ -124,9 +124,9 @@ UART frames:
 
 ## Not simulated
 
-- Fonts other than font 0: their characters draw as boxes. So do font 0
-  characters when the set has no font 0, since the simulator doesn't have
-  the one the display comes with.
+- Fonts other than font 0: their characters draw as boxes.
+- The font 0 a display comes with: when the set has no font 0, font 0
+  text is not drawn.
 - Display and touch controls other than those `degus-controls` models.
   They are reported when their page is shown; an unknown touch control's
   page switch and press effect still work.

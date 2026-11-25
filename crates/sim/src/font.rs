@@ -1,6 +1,7 @@
 //! Characters: font 0 from the set, the one font the simulator draws. A
-//! character that needs another font, a width font 0 lacks, or a font 0
-//! the set lacks draws as an outlined box of its cell.
+//! character that needs another font, or a width or code font 0 lacks,
+//! draws as an outlined box of its cell. Without a font 0 in the set, font
+//! 0 characters draw nothing, but still take their cells.
 
 use degus_set::font::{Bitmap, FONT0_WIDTHS, Font0};
 use degus_set::icl::image::{Rgb, RgbImage};
@@ -24,13 +25,16 @@ impl<'a> Mark<'a> {
     // ASSUME: font 0 glyphs draw at their own size, `w` × 2 `w`, whatever
     // height the control gives.
     pub fn new(font0: Option<&'a Font0>, font: u8, code: u32, w: u8, h: u16) -> Self {
-        if font == 0
-            && let Some(font0) = font0
-            && let Ok(code) = u8::try_from(code)
-            && FONT0_WIDTHS.contains(&w)
-            && let Some(glyph) = font0.glyph(w, code)
-        {
-            return Mark::Glyph(glyph);
+        if font == 0 {
+            let Some(font0) = font0 else {
+                return Mark::Blank { w: w.into() };
+            };
+            if let Ok(code) = u8::try_from(code)
+                && FONT0_WIDTHS.contains(&w)
+                && let Some(glyph) = font0.glyph(w, code)
+            {
+                return Mark::Glyph(glyph);
+            }
         }
         if code == u32::from(b' ') || char::from_u32(code).is_some_and(char::is_control) {
             Mark::Blank { w: w.into() }
@@ -111,19 +115,23 @@ mod tests {
             Mark::new(Some(&font), 0, 'I'.into(), 4, 8),
             Mark::Glyph(_)
         ));
-        // Another font, a width font 0 lacks, a code past ASCII, no font 0.
-        for (font0, font_id, code, w) in [
-            (Some(&font), 1, 'I' as u32, 4),
-            (Some(&font), 0, 'I' as u32, 3),
-            (Some(&font), 0, '中' as u32, 4),
-            (None, 0, 'I' as u32, 4),
-        ] {
-            let mark = Mark::new(font0, font_id, code, w, 8);
+        // Another font, a width font 0 lacks, a code past ASCII.
+        for (font_id, code, w) in [(1, 'I' as u32, 4), (0, 'I' as u32, 3), (0, '中' as u32, 4)] {
+            let mark = Mark::new(Some(&font), font_id, code, w, 8);
             assert!(matches!(mark, Mark::Box { .. }), "{font_id} {code} {w}");
         }
         assert!(matches!(
-            Mark::new(None, 0, ' '.into(), 4, 8),
+            Mark::new(Some(&font), 1, ' '.into(), 4, 8),
             Mark::Blank { w: 4 }
+        ));
+        // Without font 0, font 0 draws nothing but keeps its cell.
+        assert!(matches!(
+            Mark::new(None, 0, 'I'.into(), 4, 8),
+            Mark::Blank { w: 4 }
+        ));
+        assert!(matches!(
+            Mark::new(None, 1, 'I'.into(), 4, 8),
+            Mark::Box { .. }
         ));
     }
 

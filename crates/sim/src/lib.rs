@@ -6,8 +6,9 @@
 //! [`DwinSet::read`] from a `DWIN_SET` folder, including one made by DWIN's
 //! tools. It draws what the set holds: the icons as the JPEGs the display
 //! stores, and text with the set's font 0. Characters that need another
-//! font draw as boxes, and controls the simulator does not run are reported
-//! once, when their page is shown.
+//! font draw as boxes, and without a font 0 in the set, font 0 text is not
+//! drawn. That, and controls the simulator does not run, are reported once,
+//! when their page is shown.
 //!
 //! The simulator does no I/O and keeps no clock: whoever runs it feeds it
 //! the host's bytes, touches and time, and takes the bytes, events and

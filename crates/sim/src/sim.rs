@@ -408,8 +408,8 @@ impl Sim {
         if uses_font0 && self.set.font0.is_none() {
             self.note_once(
                 Once::Font0,
-                "the set has no font 0, so font 0 characters draw as boxes; the display \
-                 would use the font 0 it holds",
+                "the set has no font 0, so font 0 text is not drawn; the display would draw \
+                 it with the font 0 it holds",
             );
         }
     }
