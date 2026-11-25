@@ -40,7 +40,7 @@ impl fmt::Display for Size {
     }
 }
 
-/// The display a bundle is made for, which its files do not record.
+/// The display a set is made for, which its files do not record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Device {
     /// The size pages are drawn at: the panel's size, with width and
@@ -62,7 +62,7 @@ impl Device {
 
 /// Everything in a `DWIN_SET` folder, and the display it is for.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Bundle {
+pub struct DwinSet {
     pub device: Device,
     /// `T5LCFG.CFG`. Without it, the display keeps the configuration it
     /// has.
@@ -82,17 +82,17 @@ pub struct Bundle {
     pub files: BTreeMap<String, Vec<u8>>,
 }
 
-/// What [`Bundle::write`] wrote.
+/// What [`DwinSet::write`] wrote.
 #[derive(Debug, Clone)]
 pub struct Written {
-    /// The files, in the order [`Bundle::to_files`] gives.
+    /// The files, in the order [`DwinSet::to_files`] gives.
     pub files: Vec<File>,
     /// The check's warnings.
     pub warnings: Vec<Diagnostic>,
 }
 
-impl Bundle {
-    /// An empty bundle for `device`.
+impl DwinSet {
+    /// An empty set for `device`.
     pub fn new(device: Device) -> Self {
         Self {
             device,
@@ -105,7 +105,7 @@ impl Bundle {
         }
     }
 
-    /// Reads the `DWIN_SET` folder in `dir`; see [`Bundle::from_files`].
+    /// Reads the `DWIN_SET` folder in `dir`; see [`DwinSet::from_files`].
     /// Folders inside it are skipped, as the display skips them.
     pub fn read(dir: impl AsRef<Path>, device: Device) -> Result<Self> {
         let folder = dir.as_ref().join(FOLDER);
@@ -129,7 +129,7 @@ impl Bundle {
         Self::from_files(files, device)
     }
 
-    /// The bundle that `files` make, as the display reads them:
+    /// The set that `files` make, as the display reads them:
     ///
     /// - `T5LCFG*.CFG` is the configuration;
     /// - files 13 and 14 ending in `.bin` are the controls;
@@ -138,9 +138,9 @@ impl Bundle {
     /// - file 0 ending in `.hzk`, `.dzk` or `.bin` is font 0 when it is
     ///   [`FONT0_LEN`](degus_font::FONT0_LEN) bytes long, and is written
     ///   back as `0_DWIN_ASC.HZK`. Font 0 has no header, so a file 0 of
-    ///   another length goes in [`Bundle::files`], and
-    ///   [`Bundle::check`] warns about it;
-    /// - the other files go in [`Bundle::files`].
+    ///   another length goes in [`DwinSet::files`], and
+    ///   [`DwinSet::check`] warns about it;
+    /// - the other files go in [`DwinSet::files`].
     ///
     /// Names are matched ignoring case. Fails on two files with the same
     /// role, and on a file that does not read.
@@ -163,33 +163,33 @@ impl Bundle {
             }
         }
 
-        let mut bundle = Bundle::new(device);
+        let mut set = DwinSet::new(device);
         let (mut touch, mut display) = (None, None);
         for (role, file) in files {
             match role {
-                Role::Config => bundle.config = Some(Config::from_bytes(&file.bytes)?),
+                Role::Config => set.config = Some(Config::from_bytes(&file.bytes)?),
                 Role::Touch => touch = Some(file.bytes),
                 Role::Display => display = Some(file.bytes),
                 Role::Font0 if file.bytes.len() == FONT0_LEN => {
                     let font = Font0::from_bytes(&file.bytes).expect("font 0's length reads");
-                    bundle.font0 = Some(font);
+                    set.font0 = Some(font);
                 }
                 Role::Icl(number) => {
                     let icl = Icl::from_bytes(&file.bytes).map_err(|source| Error::Icl {
                         file: number,
                         source,
                     })?;
-                    bundle.icls.insert(number, icl);
+                    set.icls.insert(number, icl);
                 }
                 Role::Wae(number) => {
                     let wae = Wae::from_bytes(&file.bytes).map_err(|source| Error::Wae {
                         file: number,
                         source,
                     })?;
-                    bundle.waes.insert(number, wae);
+                    set.waes.insert(number, wae);
                 }
                 Role::Font0 | Role::Other => {
-                    bundle.files.insert(file.name, file.bytes);
+                    set.files.insert(file.name, file.bytes);
                 }
             }
         }
@@ -197,17 +197,17 @@ impl Bundle {
             let empty = Controls::new().to_bytes()?;
             let touch = touch.unwrap_or(empty.touch);
             let display = display.unwrap_or(empty.display);
-            bundle.controls = Controls::from_bytes(&touch, &display)?;
+            set.controls = Controls::from_bytes(&touch, &display)?;
         }
-        Ok(bundle)
+        Ok(set)
     }
 
     /// Encodes every file: the numbered ones by number, then the others by
     /// name.
     ///
     /// Fails on a part that cannot be encoded, a bad or repeated file name,
-    /// and files that overlap in flash. Unlike [`Bundle::write`], it does
-    /// not run [`Bundle::check`].
+    /// and files that overlap in flash. Unlike [`DwinSet::write`], it does
+    /// not run [`DwinSet::check`].
     pub fn to_files(&self) -> Result<Vec<File>> {
         let mut files = Vec::new();
         if let Some(config) = &self.config {
@@ -252,7 +252,7 @@ impl Bundle {
         Ok(files)
     }
 
-    /// Checks the bundle and, if [`Bundle::check`] finds no errors, writes
+    /// Checks the set and, if [`DwinSet::check`] finds no errors, writes
     /// its files to `dir/DWIN_SET`, replacing that folder.
     ///
     /// Nothing of an earlier write is kept: a file left in the folder would

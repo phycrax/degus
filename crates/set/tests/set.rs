@@ -1,16 +1,16 @@
 use std::ops::RangeInclusive;
 use std::path::PathBuf;
 
-use degus::config::{Config, Lcd};
-use degus::controls::{
+use degus_set::config::{Config, Lcd};
+use degus_set::controls::{
     Area, DataInput, DataType, DataVar, Encoding, IconVar, KeyCode, KeyTarget, Keyboard, Point,
     ProgressBar, TextVar, Touch, TouchAction, key,
 };
-use degus::font::{Bitmap, FONT0_LEN, Font0};
-use degus::icl::image::{DynamicImage, Rgb, RgbImage};
-use degus::icl::{Chip, Icl, IclBuilder, IclOptions, IconSource};
-use degus::wae::{SampleFormat, Wae};
-use degus::{Bundle, Device, Error, File, Size};
+use degus_set::font::{Bitmap, FONT0_LEN, Font0};
+use degus_set::icl::image::{DynamicImage, Rgb, RgbImage};
+use degus_set::icl::{Chip, Icl, IclBuilder, IclOptions, IconSource};
+use degus_set::wae::{SampleFormat, Wae};
+use degus_set::{Device, DwinSet, Error, File, Size};
 
 const SCREEN: Size = Size::new(800, 480);
 
@@ -45,20 +45,20 @@ fn wae(ids: &[u16]) -> Wae {
     wae
 }
 
-/// A bundle without problems: a home page with a button, a page-switch
+/// A set without problems: a home page with a button, a page-switch
 /// button and an icon, and a settings page with a data input and its keys.
-fn panel() -> Bundle {
-    let mut bundle = Bundle::new(Device::new(SCREEN));
-    bundle.config = Some(Config {
+fn panel() -> DwinSet {
+    let mut set = DwinSet::new(Device::new(SCREEN));
+    set.config = Some(Config {
         music_wae: 48,
         ..Config::default()
     });
-    bundle.icls.insert(32, icl(&[(0, 800, 480), (1, 800, 480)]));
-    bundle.icls.insert(40, icl(&[(0, 64, 64), (1, 64, 64)]));
-    bundle.waes.insert(48, wae(&[0]));
-    bundle.font0 = Some(font0());
+    set.icls.insert(32, icl(&[(0, 800, 480), (1, 800, 480)]));
+    set.icls.insert(40, icl(&[(0, 64, 64), (1, 64, 64)]));
+    set.waes.insert(48, wae(&[0]));
+    set.font0 = Some(font0());
 
-    let home = bundle.controls.page_mut(0);
+    let home = set.controls.page_mut(0);
     home.touch.push(Touch::new(
         Area::sized(300, 200, 120, 60),
         KeyCode::new(0x1000, 1),
@@ -79,7 +79,7 @@ fn panel() -> Bundle {
         .into(),
     );
 
-    let settings = bundle.controls.page_mut(1);
+    let settings = set.controls.page_mut(1);
     settings.touch.push(Touch::new(
         Area::sized(300, 120, 200, 60),
         DataInput {
@@ -94,12 +94,12 @@ fn panel() -> Bundle {
             TouchAction::Basic(code),
         ));
     }
-    bundle
+    set
 }
 
 /// The check's diagnostics as lines.
-fn check(bundle: &Bundle) -> Vec<String> {
-    bundle.check().iter().map(ToString::to_string).collect()
+fn check(set: &DwinSet) -> Vec<String> {
+    set.check().iter().map(ToString::to_string).collect()
 }
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -110,7 +110,7 @@ fn temp_dir(name: &str) -> PathBuf {
 }
 
 #[test]
-fn a_sound_bundle_has_no_diagnostics() {
+fn a_sound_set_has_no_diagnostics() {
     assert_eq!(check(&panel()), Vec::<String>::new());
 }
 
@@ -121,8 +121,8 @@ fn writes_the_folder_in_flash_order() {
     std::fs::create_dir_all(stale.parent().unwrap()).unwrap();
     std::fs::write(&stale, b"left over").unwrap();
 
-    let bundle = panel();
-    let written = bundle.write(&dir).unwrap();
+    let set = panel();
+    let written = set.write(&dir).unwrap();
     assert!(written.warnings.is_empty());
     let names: Vec<_> = written.files.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(
@@ -137,7 +137,7 @@ fn writes_the_folder_in_flash_order() {
             "T5LCFG.CFG"
         ]
     );
-    assert_eq!(written.files, bundle.to_files().unwrap());
+    assert_eq!(written.files, set.to_files().unwrap());
 
     let mut on_disk: Vec<_> = std::fs::read_dir(dir.join("DWIN_SET"))
         .unwrap()
@@ -152,23 +152,23 @@ fn writes_the_folder_in_flash_order() {
         assert_eq!(bytes, file.bytes, "{}", file.name);
     }
     let icl = &written.files[3];
-    assert_eq!(icl.bytes, bundle.icls[&32].to_bytes(32).unwrap());
+    assert_eq!(icl.bytes, set.icls[&32].to_bytes(32).unwrap());
     assert_eq!(icl.number(), Some(32));
 }
 
 #[test]
-fn write_refuses_a_bundle_with_errors() {
-    let dir = temp_dir("write_refuses_a_bundle_with_errors");
-    let mut bundle = panel();
-    bundle.controls.page_mut(0).touch.push(Touch::new(
+fn write_refuses_a_set_with_errors() {
+    let dir = temp_dir("write_refuses_a_set_with_errors");
+    let mut set = panel();
+    set.controls.page_mut(0).touch.push(Touch::new(
         Area::sized(750, 0, 100, 50),
         KeyCode::new(0x1001, 1),
     ));
-    let error = bundle.write(&dir).unwrap_err();
+    let error = set.write(&dir).unwrap_err();
     assert!(matches!(&error, Error::Check(diagnostics) if diagnostics.len() == 1));
     assert_eq!(
         error.to_string(),
-        "the bundle has 1 error\n\
+        "the set has 1 error\n\
          error: page 0, touch control 2: area (750, 0) 100x50 extends past the 800x480 screen"
     );
     // So that `main` returning the error prints it readably.
@@ -178,8 +178,8 @@ fn write_refuses_a_bundle_with_errors() {
 
 #[test]
 fn reports_controls_off_the_screen() {
-    let mut bundle = panel();
-    let home = bundle.controls.page_mut(0);
+    let mut set = panel();
+    let home = set.controls.page_mut(0);
     home.touch.push(Touch::new(
         Area::new(10, 10, 10, 50),
         KeyCode::new(0x1001, 1),
@@ -220,7 +220,7 @@ fn reports_controls_off_the_screen() {
         .into(),
     );
     assert_eq!(
-        check(&bundle),
+        check(&set),
         [
             "error: page 0, touch control 2: area is empty",
             "error: page 0, touch control 3: limits 10 to -10 are the wrong way round",
@@ -236,9 +236,9 @@ fn reports_controls_off_the_screen() {
 }
 
 #[test]
-fn reports_what_controls_name_that_the_bundle_lacks() {
-    let mut bundle = panel();
-    let home = bundle.controls.page_mut(0);
+fn reports_what_controls_name_that_the_set_lacks() {
+    let mut set = panel();
+    let home = set.controls.page_mut(0);
     home.touch.push(Touch {
         next_page: Some(7),
         pressed_page: Some(5000),
@@ -270,7 +270,7 @@ fn reports_what_controls_name_that_the_bundle_lacks() {
         }
         .into(),
     );
-    bundle.controls.page_mut(2).touch.push(Touch::new(
+    set.controls.page_mut(2).touch.push(Touch::new(
         Area::sized(0, 0, 10, 10),
         DataInput {
             keyboard: Keyboard::Page {
@@ -282,14 +282,14 @@ fn reports_what_controls_name_that_the_bundle_lacks() {
         },
     ));
     assert_eq!(
-        check(&bundle),
+        check(&set),
         [
             "warning: page 2: has no background image in 32.icl",
             "warning: page 0, touch control 2: next_page 7 has no background image in 32.icl",
             "error: page 0, touch control 2: pressed_page 5000 is not below 4092",
             "warning: page 0, touch control 3: its keyboard is on its own page, which has no \
              keyboard keys",
-            "error: page 0, display control 1: icon_lib 41 is not in the bundle",
+            "error: page 0, display control 1: icon_lib 41 is not in the set",
             "error: page 0, display control 2: 40.icl has no icon 2, 3, 4, 5",
             "warning: page 0, display control 3: values 0..=3 and icons 0..=2 differ in \
              length; the display shows icon_min + (value - val_min)",
@@ -301,26 +301,26 @@ fn reports_what_controls_name_that_the_bundle_lacks() {
 
 #[test]
 fn reports_values_the_files_cannot_hold() {
-    let mut bundle = panel();
-    bundle.controls.page_mut(1).touch[0] = Touch::new(
+    let mut set = panel();
+    set.controls.page_mut(1).touch[0] = Touch::new(
         Area::sized(0, 0, 10, 10),
         KeyCode {
             target: KeyTarget::Bit(16),
             ..KeyCode::new(0x1001, 1)
         },
     );
-    bundle.config.as_mut().unwrap().brightness = 101;
+    set.config.as_mut().unwrap().brightness = 101;
     assert_eq!(
-        check(&bundle),
+        check(&set),
         [
             "error: T5LCFG.CFG: brightness is 101, not in 0-100",
             "error: page 1, touch control 0: target bit 16 is not in 0-15",
         ]
     );
-    assert!(matches!(bundle.to_files(), Err(Error::Config(_))));
+    assert!(matches!(set.to_files(), Err(Error::Config(_))));
 
-    let mut bundle = panel();
-    bundle.controls.page_mut(0).display.push(
+    let mut set = panel();
+    set.controls.page_mut(0).display.push(
         DataVar {
             unit: "°C".into(),
             ..DataVar::default()
@@ -328,23 +328,23 @@ fn reports_values_the_files_cannot_hold() {
         .into(),
     );
     assert_eq!(
-        check(&bundle),
+        check(&set),
         ["error: page 0, display control 1: unit \"°C\" must be ASCII and at most 11 bytes"]
     );
-    assert!(matches!(bundle.to_files(), Err(Error::Controls(_))));
+    assert!(matches!(set.to_files(), Err(Error::Controls(_))));
 }
 
 #[test]
 fn reports_file_names_and_flash_overlaps() {
-    let mut bundle = panel();
-    bundle.files.insert("13touchfile.BIN".into(), vec![1]);
-    bundle.files.insert("fonts/1.hzk".into(), vec![1]);
-    bundle.files.insert("T5LCFG_800480.CFG".into(), vec![1]);
+    let mut set = panel();
+    set.files.insert("13touchfile.BIN".into(), vec![1]);
+    set.files.insert("fonts/1.hzk".into(), vec![1]);
+    set.files.insert("T5LCFG_800480.CFG".into(), vec![1]);
     assert_eq!(
-        check(&bundle),
+        check(&set),
         [
             "error: T5LCFG_800480.CFG: the display would read it as well as the T5LCFG.CFG \
-             the bundle writes",
+             the set writes",
             "error: 13touchfile.BIN: is the same file as 13TouchFile.bin to the display",
             "error: fonts/1.hzk: is not a file name for DWIN_SET: files go in DWIN_SET \
              itself, not in folders",
@@ -354,32 +354,30 @@ fn reports_file_names_and_flash_overlaps() {
         ]
     );
 
-    let mut bundle = panel();
-    bundle
-        .files
-        .insert("50_big.bin".into(), vec![0; 300 * 1024]);
-    bundle.files.insert("51_next.bin".into(), vec![0; 10]);
+    let mut set = panel();
+    set.files.insert("50_big.bin".into(), vec![0; 300 * 1024]);
+    set.files.insert("51_next.bin".into(), vec![0; 10]);
     assert_eq!(
-        check(&bundle),
+        check(&set),
         [
             "error: 51_next.bin: overlaps 50_big.bin in flash: a file takes 256 KB per file \
           number, so a large file runs into the next numbers"
         ]
     );
     assert!(matches!(
-        bundle.to_files(),
+        set.to_files(),
         Err(Error::FlashOverlap { first, second }) if first == "50_big.bin" && second == "51_next.bin"
     ));
 
-    let mut bundle = panel();
-    bundle.files.insert("a:b".into(), vec![1]);
-    assert!(matches!(bundle.to_files(), Err(Error::FileName { name, .. }) if name == "a:b"));
+    let mut set = panel();
+    set.files.insert("a:b".into(), vec![1]);
+    assert!(matches!(set.to_files(), Err(Error::FileName { name, .. }) if name == "a:b"));
 }
 
 #[test]
-fn reports_what_the_configuration_names_that_the_bundle_lacks() {
-    let mut bundle = panel();
-    bundle.config = Some(Config {
+fn reports_what_the_configuration_names_that_the_set_lacks() {
+    let mut set = panel();
+    set.config = Some(Config {
         background_icl: 33,
         music_wae: 49,
         load_22: true,
@@ -401,14 +399,14 @@ fn reports_what_the_configuration_names_that_the_bundle_lacks() {
         ..Config::default()
     });
     assert_eq!(
-        check(&bundle),
+        check(&set),
         [
-            "error: T5LCFG.CFG: background_icl 33 is not in the bundle",
-            "warning: T5LCFG.CFG: music_wae 49 is not in the bundle; the display plays music \
+            "error: T5LCFG.CFG: background_icl 33 is not in the set",
+            "warning: T5LCFG.CFG: music_wae 49 is not in the set; the display plays music \
              from the file 49 it holds",
-            "warning: T5LCFG.CFG: picture_replace_icl 50 is not in the bundle; the display \
+            "warning: T5LCFG.CFG: picture_replace_icl 50 is not in the set; the display \
              uses the file 50 it holds",
-            "warning: T5LCFG.CFG: load_22 is on, but the bundle has no file 22; the display \
+            "warning: T5LCFG.CFG: load_22 is on, but the set has no file 22; the display \
              loads the file 22 it holds",
             "warning: T5LCFG.CFG: the LCD is 1024x600, so pages at 0° are 1024x600, not the \
              800x480 of the device",
@@ -420,19 +418,19 @@ fn reports_what_the_configuration_names_that_the_bundle_lacks() {
 
 #[test]
 fn checks_icons_against_the_chip_and_the_screen() {
-    let mut bundle = panel();
-    bundle.icls.insert(32, icl(&[(0, 800, 480), (1, 400, 240)]));
+    let mut set = panel();
+    set.icls.insert(32, icl(&[(0, 800, 480), (1, 400, 240)]));
     assert_eq!(
-        check(&bundle),
+        check(&set),
         [
             "warning: 32.icl, icon 1: is 400x240, but the background of page 1 fills the \
           800x480 screen"
         ]
     );
 
-    let mut bundle = panel();
-    bundle.device.chip = Chip::Custom(8);
-    let diagnostics = check(&bundle);
+    let mut set = panel();
+    set.device.chip = Chip::Custom(8);
+    let diagnostics = check(&set);
     assert_eq!(diagnostics.len(), 4, "{diagnostics:#?}");
     assert!(
         diagnostics[0].starts_with("error: 32.icl, icon 0: is a ")
@@ -445,32 +443,29 @@ fn checks_icons_against_the_chip_and_the_screen() {
 
 #[test]
 fn empty_libraries_cannot_be_written() {
-    let mut bundle = panel();
-    bundle.icls.insert(41, Icl::new());
-    bundle.waes.insert(49, Wae::new(SampleFormat::Pcm16));
+    let mut set = panel();
+    set.icls.insert(41, Icl::new());
+    set.waes.insert(49, Wae::new(SampleFormat::Pcm16));
     assert_eq!(
-        check(&bundle),
+        check(&set),
         ["error: 41.icl: has no icons", "error: 49.wae: has no clips"]
     );
-    assert!(matches!(
-        bundle.to_files(),
-        Err(Error::Icl { file: 41, .. })
-    ));
+    assert!(matches!(set.to_files(), Err(Error::Icl { file: 41, .. })));
 }
 
 #[test]
 fn reads_what_it_writes() {
     let dir = temp_dir("reads_what_it_writes");
-    let bundle = panel();
-    bundle.write(&dir).unwrap();
+    let set = panel();
+    set.write(&dir).unwrap();
     std::fs::create_dir(dir.join("DWIN_SET").join("backup")).unwrap();
-    assert_eq!(Bundle::read(&dir, bundle.device).unwrap(), bundle);
+    assert_eq!(DwinSet::read(&dir, set.device).unwrap(), set);
 }
 
 #[test]
 fn reads_files_as_the_display_does() {
-    let bundle = panel();
-    let mut files = bundle.to_files().unwrap();
+    let set = panel();
+    let mut files = set.to_files().unwrap();
     for file in &mut files {
         file.name = match file.name.as_str() {
             "13TouchFile.bin" => "13触控配置文件.bin".into(),
@@ -482,11 +477,11 @@ fn reads_files_as_the_display_does() {
     }
     files.push(File::new("22_Config.bin", vec![1, 2]));
     files.push(File::new("300.icl", vec![3]));
-    let read = Bundle::from_files(files, bundle.device).unwrap();
-    assert_eq!(read.config, bundle.config);
-    assert_eq!(read.controls, bundle.controls);
-    assert_eq!(read.icls, bundle.icls);
-    assert_eq!(read.font0, bundle.font0);
+    let read = DwinSet::from_files(files, set.device).unwrap();
+    assert_eq!(read.config, set.config);
+    assert_eq!(read.controls, set.controls);
+    assert_eq!(read.icls, set.icls);
+    assert_eq!(read.font0, set.font0);
     // ICL numbers are bytes, so 300.icl stays a plain file.
     assert_eq!(
         read.files.keys().collect::<Vec<_>>(),
@@ -494,12 +489,12 @@ fn reads_files_as_the_display_does() {
     );
 
     // Without file 13, the pages have no touch controls.
-    let files = bundle
+    let files = set
         .to_files()
         .unwrap()
         .into_iter()
         .filter(|file| file.name != "13TouchFile.bin");
-    let read = Bundle::from_files(files, bundle.device).unwrap();
+    let read = DwinSet::from_files(files, set.device).unwrap();
     assert!(read.controls.iter().all(|(_, page)| page.touch.is_empty()));
     assert_eq!(read.controls.get(0).unwrap().display.len(), 1);
 }
@@ -508,7 +503,7 @@ fn reads_files_as_the_display_does() {
 fn reads_font_0_by_its_number_and_length() {
     let device = Device::new(SCREEN);
     let font = font0();
-    let read = Bundle::from_files([File::new("0.bin", font.to_bytes())], device).unwrap();
+    let read = DwinSet::from_files([File::new("0.bin", font.to_bytes())], device).unwrap();
     assert_eq!(read.font0.as_ref(), Some(&font));
     assert!(read.files.is_empty());
     // Written back under DWIN's name, first: it is file 0.
@@ -516,7 +511,7 @@ fn reads_font_0_by_its_number_and_length() {
 
     // Font 0 has no header, so a file 0 of another length stays as it is,
     // and the check says why.
-    let short = Bundle::from_files([File::new("0_DWIN_ASC.HZK", vec![0; 1000])], device).unwrap();
+    let short = DwinSet::from_files([File::new("0_DWIN_ASC.HZK", vec![0; 1000])], device).unwrap();
     assert_eq!(short.font0, None);
     assert_eq!(short.files["0_DWIN_ASC.HZK"], vec![0; 1000]);
     assert_eq!(
@@ -528,7 +523,7 @@ fn reads_font_0_by_its_number_and_length() {
     );
 
     // Other files numbered 0 are not fonts.
-    let logo = Bundle::from_files([File::new("0_logo.png", vec![1])], device).unwrap();
+    let logo = DwinSet::from_files([File::new("0_logo.png", vec![1])], device).unwrap();
     assert_eq!(logo.font0, None);
     assert_eq!(check(&logo), Vec::<String>::new());
 
@@ -537,14 +532,14 @@ fn reads_font_0_by_its_number_and_length() {
         File::new("0.bin", vec![1]),
     ];
     assert!(matches!(
-        Bundle::from_files(two, device),
+        DwinSet::from_files(two, device),
         Err(Error::Duplicate { .. })
     ));
 }
 
 #[test]
 fn checks_the_sizes_controls_take_from_font_0() {
-    let mut bundle = panel();
+    let mut set = panel();
     let text = |encoding, ascii_font, font, font_width| TextVar {
         area: Area::sized(10, 300, 200, 40),
         encoding,
@@ -554,7 +549,7 @@ fn checks_the_sizes_controls_take_from_font_0() {
         font_height: font_width,
         ..TextVar::default()
     };
-    let home = bundle.controls.page_mut(0);
+    let home = set.controls.page_mut(0);
     home.display.push(
         DataVar {
             position: Point::new(10, 10),
@@ -580,12 +575,12 @@ fn checks_the_sizes_controls_take_from_font_0() {
     home.display.push(text(Encoding::Gb2312, 0, 5, 24).into());
     home.display.push(text(Encoding::Unicode, 0, 0, 16).into());
     home.display.push(text(Encoding::Gbk, 0, 0, 16).into());
-    if let TouchAction::DataInput(input) = &mut bundle.controls.page_mut(1).touch[0].action {
+    if let TouchAction::DataInput(input) = &mut set.controls.page_mut(1).touch[0].action {
         input.font_size = 70;
     }
 
     assert_eq!(
-        check(&bundle),
+        check(&set),
         [
             "error: page 0, display control 1: font_size 3 is not a width of font 0, which \
              has 4 to 64",
@@ -604,9 +599,9 @@ fn checks_the_sizes_controls_take_from_font_0() {
 }
 
 #[test]
-fn checks_that_the_bundle_s_font_0_draws_what_numbers_need() {
-    let mut bundle = panel();
-    let font = bundle.font0.as_mut().unwrap();
+fn checks_that_the_set_s_font_0_draws_what_numbers_need() {
+    let mut set = panel();
+    let font = set.font0.as_mut().unwrap();
     for code in *b"7-g" {
         font.set(12, code, Bitmap::new(12, 24)).unwrap();
     }
@@ -619,44 +614,44 @@ fn checks_that_the_bundle_s_font_0_draws_what_numbers_need() {
         font_size,
         ..DataVar::default()
     };
-    let home = bundle.controls.page_mut(0);
+    let home = set.controls.page_mut(0);
     home.display.push(number(DataType::U16, 0, "kg", 12).into());
     home.display.push(number(DataType::I16, 1, "", 12).into());
     home.display.push(number(DataType::I16, 1, "kg", 13).into());
-    if let TouchAction::DataInput(input) = &mut bundle.controls.page_mut(1).touch[0].action {
+    if let TouchAction::DataInput(input) = &mut set.controls.page_mut(1).touch[0].action {
         input.masked = true;
     }
 
     assert_eq!(
-        check(&bundle),
+        check(&set),
         [
-            "warning: page 0, display control 1: the bundle's font 0 draws nothing for '7', \
+            "warning: page 0, display control 1: the set's font 0 draws nothing for '7', \
              'g' at width 12",
-            "warning: page 0, display control 2: the bundle's font 0 draws nothing for '-', \
+            "warning: page 0, display control 2: the set's font 0 draws nothing for '-', \
              '7' at width 12",
-            "warning: page 1, touch control 0: the bundle's font 0 draws nothing for '*' at \
+            "warning: page 1, touch control 0: the set's font 0 draws nothing for '*' at \
              width 16",
         ]
     );
 
     // The font 0 a display comes with has every character.
-    bundle.font0 = None;
-    assert_eq!(check(&bundle), Vec::<String>::new());
+    set.font0 = None;
+    assert_eq!(check(&set), Vec::<String>::new());
 }
 
 #[test]
 fn font_0_takes_files_0_to_11() {
-    let mut bundle = panel();
-    bundle.files.insert("11_data.bin".into(), vec![1]);
-    bundle.files.insert("12_data.bin".into(), vec![1]);
-    let diagnostics = check(&bundle);
+    let mut set = panel();
+    set.files.insert("11_data.bin".into(), vec![1]);
+    set.files.insert("12_data.bin".into(), vec![1]);
+    let diagnostics = check(&set);
     assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
     assert!(
         diagnostics[0].starts_with("error: 11_data.bin: overlaps 0_DWIN_ASC.HZK in flash"),
         "{diagnostics:#?}"
     );
     assert!(matches!(
-        bundle.to_files(),
+        set.to_files(),
         Err(Error::FlashOverlap { first, second })
             if first == "0_DWIN_ASC.HZK" && second == "11_data.bin"
     ));
@@ -665,7 +660,7 @@ fn font_0_takes_files_0_to_11() {
 #[test]
 fn rejects_files_that_do_not_read() {
     let device = Device::new(SCREEN);
-    let duplicate = Bundle::from_files(
+    let duplicate = DwinSet::from_files(
         [File::new("32.icl", vec![]), File::new("32_x.ICL", vec![])],
         device,
     );
@@ -678,19 +673,19 @@ fn rejects_files_that_do_not_read() {
         File::new("t5lcfg2.cfg", vec![]),
     ];
     assert!(matches!(
-        Bundle::from_files(configs, device),
+        DwinSet::from_files(configs, device),
         Err(Error::Duplicate { .. })
     ));
     assert!(matches!(
-        Bundle::from_files([File::new("40.icl", b"DGUS_2".to_vec())], device),
+        DwinSet::from_files([File::new("40.icl", b"DGUS_2".to_vec())], device),
         Err(Error::Icl { file: 40, .. })
     ));
     assert!(matches!(
-        Bundle::from_files([File::new("T5LCFG.CFG", vec![0; 4])], device),
+        DwinSet::from_files([File::new("T5LCFG.CFG", vec![0; 4])], device),
         Err(Error::Config(_))
     ));
     assert!(matches!(
-        Bundle::read(temp_dir("rejects_files_that_do_not_read"), device),
+        DwinSet::read(temp_dir("rejects_files_that_do_not_read"), device),
         Err(Error::Io { .. })
     ));
 }

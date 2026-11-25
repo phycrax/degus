@@ -5,7 +5,7 @@ use crate::check::Diagnostic;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// Errors produced while writing or reading a bundle.
+/// Errors produced while writing or reading a set.
 ///
 /// `Debug` prints the same as `Display`, so that a `main` returning this
 /// error shows a readable message.
@@ -17,7 +17,7 @@ pub enum Error {
         #[source]
         source: std::io::Error,
     },
-    /// [`Bundle::check`](crate::Bundle::check) found errors. Holds every
+    /// [`DwinSet::check`](crate::DwinSet::check) found errors. Holds every
     /// diagnostic, warnings included, and prints them all.
     #[error("{}", check_message(.0))]
     Check(Vec<Diagnostic>),
@@ -54,11 +54,11 @@ impl fmt::Debug for Error {
     }
 }
 
-/// `the bundle has 2 errors`, then each diagnostic on a line of its own.
+/// `the set has 2 errors`, then each diagnostic on a line of its own.
 fn check_message(diagnostics: &[Diagnostic]) -> String {
     let errors = diagnostics.iter().filter(|d| d.is_error()).count();
     let plural = if errors == 1 { "" } else { "s" };
-    let mut message = format!("the bundle has {errors} error{plural}");
+    let mut message = format!("the set has {errors} error{plural}");
     for diagnostic in diagnostics {
         message.push('\n');
         message.push_str(&diagnostic.to_string());

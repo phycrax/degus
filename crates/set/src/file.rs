@@ -1,18 +1,18 @@
-//! The names of the files in a `DWIN_SET` folder: those a bundle writes,
+//! The names of the files in a `DWIN_SET` folder: those a set writes,
 //! and what each name is to the display.
 
-use crate::bundle::SLOT_SIZE;
+use crate::set::SLOT_SIZE;
 
-/// The configuration file a bundle writes. The display reads any
+/// The configuration file a set writes. The display reads any
 /// `T5LCFG*.CFG` as its configuration.
 pub const CONFIG_FILE: &str = "T5LCFG.CFG";
-/// The touch control file a bundle writes, named as DWIN's tools name it.
+/// The touch control file a set writes, named as DWIN's tools name it.
 /// The display reads file 13 ending in `.bin` as its touch controls.
 pub const TOUCH_FILE: &str = "13TouchFile.bin";
-/// The display control file a bundle writes, named as DWIN's tools name
+/// The display control file a set writes, named as DWIN's tools name
 /// it. The display reads file 14 ending in `.bin` as its display controls.
 pub const DISPLAY_FILE: &str = "14ShowFile.bin";
-/// The font 0 file a bundle writes, named as DWIN's tools name it. The
+/// The font 0 file a set writes, named as DWIN's tools name it. The
 /// display stores file 0 at the start of its flash, where font 0 lives.
 pub const FONT0_FILE: &str = "0_DWIN_ASC.HZK";
 
@@ -66,12 +66,12 @@ pub(crate) fn is_config_file(name: &str) -> bool {
     name.starts_with("T5LCFG") && name.ends_with(".CFG")
 }
 
-/// The name a bundle writes the ICL of file number `file` under.
+/// The name a set writes the ICL of file number `file` under.
 pub(crate) fn icl_name(file: u8) -> String {
     format!("{file}.icl")
 }
 
-/// The name a bundle writes the WAE of file number `file` under.
+/// The name a set writes the WAE of file number `file` under.
 pub(crate) fn wae_name(file: u8) -> String {
     format!("{file}.wae")
 }

@@ -8,11 +8,11 @@ use degus_controls::{
 use degus_font::{FONT0_LEN, FONT0_WIDTHS};
 use degus_icl::Icl;
 
-use crate::bundle::{Bundle, LayoutProblem, layout_problems};
 use crate::file::{
     CONFIG_FILE, DISPLAY_FILE, FONT0_FILE, Role, TOUCH_FILE, icl_name, is_config_file, number,
     wae_name,
 };
+use crate::set::{DwinSet, LayoutProblem, layout_problems};
 
 /// The background ICL of a display whose configuration names no other.
 const DEFAULT_BACKGROUND_ICL: u8 = 32;
@@ -25,7 +25,7 @@ const MISSING_SHOWN: usize = 8;
 pub enum Severity {
     /// Writes, but probably not what was meant.
     Warning,
-    /// Stops [`Bundle::write`].
+    /// Stops [`DwinSet::write`].
     Error,
 }
 
@@ -53,7 +53,7 @@ pub enum Location {
     Wae(u8),
     /// The configuration, `T5LCFG.CFG`.
     Config,
-    /// A file of [`Bundle::files`], or one the bundle writes.
+    /// A file of [`DwinSet::files`], or one the set writes.
     File(String),
 }
 
@@ -75,7 +75,7 @@ impl fmt::Display for Location {
     }
 }
 
-/// A problem [`Bundle::check`] found.
+/// A problem [`DwinSet::check`] found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub severity: Severity,
@@ -100,9 +100,9 @@ impl fmt::Display for Diagnostic {
     }
 }
 
-impl Bundle {
-    /// Finds what would keep the display from showing the bundle as meant:
-    /// errors, which make [`Bundle::write`] refuse the bundle, and warnings.
+impl DwinSet {
+    /// Finds what would keep the display from showing the set as meant:
+    /// errors, which make [`DwinSet::write`] refuse the set, and warnings.
     pub fn check(&self) -> Vec<Diagnostic> {
         let mut checker = Checker::new(self);
         let numbers = checker.files();
@@ -115,9 +115,9 @@ impl Bundle {
 }
 
 struct Checker<'a> {
-    bundle: &'a Bundle,
+    set: &'a DwinSet,
     diagnostics: Vec<Diagnostic>,
-    /// The background ICL the display uses, when the bundle has it: image
+    /// The background ICL the display uses, when the set has it: image
     /// N is the background of page N.
     backgrounds: Option<(u8, &'a Icl)>,
     /// Pages with keyboard keys.
@@ -125,21 +125,21 @@ struct Checker<'a> {
 }
 
 impl<'a> Checker<'a> {
-    fn new(bundle: &'a Bundle) -> Self {
-        let background = bundle
+    fn new(set: &'a DwinSet) -> Self {
+        let background = set
             .config
             .as_ref()
             .map_or(DEFAULT_BACKGROUND_ICL, |config| config.background_icl);
-        let key_pages = bundle
+        let key_pages = set
             .controls
             .iter()
             .filter(|(_, page)| page.touch.iter().any(is_key))
             .map(|(id, _)| id)
             .collect();
         Self {
-            bundle,
+            set,
             diagnostics: Vec::new(),
-            backgrounds: bundle.icls.get(&background).map(|icl| (background, icl)),
+            backgrounds: set.icls.get(&background).map(|icl| (background, icl)),
             key_pages,
         }
     }
@@ -163,16 +163,16 @@ impl<'a> Checker<'a> {
     /// Encodes each part, and checks the folder they make: names and
     /// flash. Returns the file numbers in use.
     fn files(&mut self) -> BTreeSet<u16> {
-        let bundle = self.bundle;
+        let set = self.set;
         // Each file's name and length.
         let mut files: Vec<(String, usize)> = Vec::new();
-        if let Some(config) = &bundle.config {
+        if let Some(config) = &set.config {
             match config.to_bytes() {
                 Ok(bytes) => files.push((CONFIG_FILE.to_owned(), bytes.len())),
                 Err(error) => self.error(Location::Config, error.to_string()),
             }
         }
-        match bundle.controls.to_bytes() {
+        match set.controls.to_bytes() {
             Ok(built) => {
                 files.push((TOUCH_FILE.to_owned(), built.touch.len()));
                 files.push((DISPLAY_FILE.to_owned(), built.display.len()));
@@ -182,29 +182,29 @@ impl<'a> Checker<'a> {
                 self.error(location, message);
             }
         }
-        if bundle.font0.is_some() {
+        if set.font0.is_some() {
             files.push((FONT0_FILE.to_owned(), FONT0_LEN));
         }
-        for (&file, icl) in &bundle.icls {
+        for (&file, icl) in &set.icls {
             match icl.to_bytes(file) {
                 Ok(bytes) => files.push((icl_name(file), bytes.len())),
                 Err(degus_icl::Error::Empty) => self.error(Location::Icl(file), "has no icons"),
                 Err(error) => self.error(Location::Icl(file), error.to_string()),
             }
         }
-        for (&file, wae) in &bundle.waes {
+        for (&file, wae) in &set.waes {
             match wae.to_bytes() {
                 Ok(bytes) => files.push((wae_name(file), bytes.len())),
                 Err(degus_wae::Error::Empty) => self.error(Location::Wae(file), "has no clips"),
                 Err(error) => self.error(Location::Wae(file), error.to_string()),
             }
         }
-        for (name, bytes) in &bundle.files {
-            if bundle.config.is_some() && is_config_file(name) {
+        for (name, bytes) in &set.files {
+            if set.config.is_some() && is_config_file(name) {
                 self.error(
                     Location::File(name.clone()),
                     format!(
-                        "the display would read it as well as the {} the bundle writes",
+                        "the display would read it as well as the {} the set writes",
                         CONFIG_FILE
                     ),
                 );
@@ -242,36 +242,36 @@ impl<'a> Checker<'a> {
     }
 
     /// Checks what the configuration refers to. `numbers` are the file
-    /// numbers in the bundle.
+    /// numbers in the set.
     fn config(&mut self, numbers: &BTreeSet<u16>) {
-        let bundle = self.bundle;
-        let Some(config) = &bundle.config else {
+        let set = self.set;
+        let Some(config) = &set.config else {
             return;
         };
         let background = config.background_icl;
-        if !bundle.icls.contains_key(&background) {
+        if !set.icls.contains_key(&background) {
             self.error(
                 Location::Config,
-                format!("background_icl {background} is not in the bundle"),
+                format!("background_icl {background} is not in the set"),
             );
         }
         let music = config.music_wae;
-        if !bundle.waes.is_empty() && !bundle.waes.contains_key(&music) {
+        if !set.waes.is_empty() && !set.waes.contains_key(&music) {
             self.warning(
                 Location::Config,
                 format!(
-                    "music_wae {music} is not in the bundle; the display plays music from \
+                    "music_wae {music} is not in the set; the display plays music from \
                      the file {music} it holds"
                 ),
             );
         }
         if let Some(icl) = config.picture_replace_icl
-            && !bundle.icls.contains_key(&icl)
+            && !set.icls.contains_key(&icl)
         {
             self.warning(
                 Location::Config,
                 format!(
-                    "picture_replace_icl {icl} is not in the bundle; the display uses the \
+                    "picture_replace_icl {icl} is not in the set; the display uses the \
                      file {icl} it holds"
                 ),
             );
@@ -282,7 +282,7 @@ impl<'a> Checker<'a> {
                 self.warning(
                     Location::Config,
                     format!(
-                        "load_22 is on, but the bundle has no file {init}; the display loads \
+                        "load_22 is on, but the set has no file {init}; the display loads \
                          the file {init} it holds"
                     ),
                 );
@@ -294,7 +294,7 @@ impl<'a> Checker<'a> {
             } else {
                 (lcd.h_d, lcd.v_d)
             };
-            let screen = bundle.device.screen;
+            let screen = set.device.screen;
             if (w, h) != (screen.w, screen.h) {
                 self.warning(
                     Location::Config,
@@ -322,8 +322,8 @@ impl<'a> Checker<'a> {
 
     /// Checks each icon against the chip's limit.
     fn icons(&mut self) {
-        let limit = self.bundle.device.chip.max_jpeg_size();
-        for (&file, icl) in &self.bundle.icls {
+        let limit = self.set.device.chip.max_jpeg_size();
+        for (&file, icl) in &self.set.icls {
             for (&id, icon) in &icl.icons {
                 let size = icon.jpeg().len();
                 if size > limit {
@@ -345,8 +345,8 @@ impl<'a> Checker<'a> {
         let Some((file, icl)) = self.backgrounds else {
             return;
         };
-        let screen = self.bundle.device.screen;
-        for (id, _) in self.bundle.controls.iter() {
+        let screen = self.set.device.screen;
+        for (id, _) in self.set.controls.iter() {
             match icl.icons.get(&id) {
                 None => self.warning(
                     Location::Page(id),
@@ -369,7 +369,7 @@ impl<'a> Checker<'a> {
     }
 
     fn controls(&mut self) {
-        for (page, controls) in self.bundle.controls.iter() {
+        for (page, controls) in self.set.controls.iter() {
             for (index, touch) in controls.touch.iter().enumerate() {
                 self.touch(&Location::Touch { page, index }, page, touch);
             }
@@ -426,7 +426,7 @@ impl<'a> Checker<'a> {
                     );
                 }
                 self.area(at, "keyboard area", area);
-                let screen = self.bundle.device.screen;
+                let screen = self.set.device.screen;
                 let right = u32::from(position.x) + u32::from(area.width());
                 let bottom = u32::from(position.y) + u32::from(area.height());
                 if right > u32::from(screen.w) || bottom > u32::from(screen.h) {
@@ -530,10 +530,10 @@ impl<'a> Checker<'a> {
             };
             (format!("{} (the background ICL)", icl_name(file)), icl)
         } else {
-            let Some(icl) = self.bundle.icls.get(&icon.icon_lib) else {
+            let Some(icl) = self.set.icls.get(&icon.icon_lib) else {
                 self.error(
                     at.clone(),
-                    format!("icon_lib {} is not in the bundle", icon.icon_lib),
+                    format!("icon_lib {} is not in the set", icon.icon_lib),
                 );
                 return;
             };
@@ -596,7 +596,7 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        let Some(font0) = &self.bundle.font0 else {
+        let Some(font0) = &self.set.font0 else {
             // The font 0 a display comes with has all of ASCII.
             return;
         };
@@ -616,7 +616,7 @@ impl<'a> Checker<'a> {
                 .join(", ");
             self.warning(
                 at.clone(),
-                format!("the bundle's font 0 draws nothing for {list} at width {width}"),
+                format!("the set's font 0 draws nothing for {list} at width {width}"),
             );
         }
     }
@@ -666,7 +666,7 @@ impl<'a> Checker<'a> {
 
     /// Checks that `area`, named `key`, holds pixels and is on the screen.
     fn area(&mut self, at: &Location, key: &str, area: Area) {
-        let screen = self.bundle.device.screen;
+        let screen = self.set.device.screen;
         if area.width() == 0 || area.height() == 0 {
             self.error(at.clone(), format!("{key} is empty"));
         } else if area.bottom_right.x > screen.w || area.bottom_right.y > screen.h {
@@ -685,7 +685,7 @@ impl<'a> Checker<'a> {
 
     /// Checks that `point`, named `key`, is on the screen.
     fn point(&mut self, at: &Location, key: &str, point: Point) {
-        let screen = self.bundle.device.screen;
+        let screen = self.set.device.screen;
         if point.x >= screen.w || point.y >= screen.h {
             self.error(
                 at.clone(),

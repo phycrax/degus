@@ -28,9 +28,9 @@ A typical product has three crates:
 - **`ui`**, shared by the other two: page IDs, VP addresses, icon IDs and
   the types behind them. It needs no degus crate, at most `serde` for the
   types the firmware sends, so it builds for the firmware too.
-- **The panel**, a program depending on `ui` and `degus`. It builds the
-  icon and audio libraries from images and sounds, places the controls on
-  the pages, checks the result and writes `DWIN_SET`.
+- **The panel**, a program depending on `ui` and `degus-set`. It builds
+  the icon and audio libraries from images and sounds, places the controls
+  on the pages, checks the result and writes `DWIN_SET`.
 - **The firmware**, depending on `ui` and `degus-driver`, which talks to
   the display over its UART.
 
@@ -42,7 +42,7 @@ cannot disagree about them.
 degus is not on crates.io yet:
 
 ```sh
-cargo add degus --git https://github.com/phycrax/degus
+cargo add degus-set --git https://github.com/phycrax/degus
 ```
 
 The panel program runs with `cargo run`. Copy the `DWIN_SET` folder it
@@ -50,17 +50,17 @@ writes to an SD card and download it to the display.
 
 ## What degus does
 
-- A `Bundle` holds everything in `DWIN_SET`: the configuration, the touch
+- A `DwinSet` holds everything in `DWIN_SET`: the configuration, the touch
   and display controls of every page, the icon and audio libraries by file
   number, font 0, and any other files, such as the other fonts.
-- `Bundle::check` reports problems by location: controls off the screen,
-  icons and libraries a control names but the bundle lacks, pages without
+- `DwinSet::check` reports problems by location: controls off the screen,
+  icons and libraries a control names but the set lacks, pages without
   a background, icons too large for the chip, files that run into each
   other in flash, font 0 sizes that controls ask for but font 0 lacks,
-  digits the bundle's font 0 doesn't draw, and more.
-- `Bundle::write` checks the bundle, refuses it on errors and writes the
+  digits the set's font 0 doesn't draw, and more.
+- `DwinSet::write` checks the set, refuses it on errors and writes the
   folder.
-- `Bundle::read` reads a folder back, including one made by DWIN's tools.
+- `DwinSet::read` reads a folder back, including one made by DWIN's tools.
 
 The formats it writes, and reads back:
 
@@ -114,13 +114,14 @@ either side.
 
 ## Crates
 
-The panel depends on `degus` alone, which re-exports the format crates as
-`degus::icl`, `degus::wae`, `degus::controls`, `degus::config` and
-`degus::font`. The firmware depends on `degus-driver`.
+The panel depends on `degus-set` alone, which re-exports the format crates
+as `degus_set::icl`, `degus_set::wae`, `degus_set::controls`,
+`degus_set::config` and `degus_set::font`. The firmware depends on
+`degus-driver`.
 
 | Crate | |
 |-------|---|
-| `degus` | Bundles: check, write and read `DWIN_SET`. |
+| `degus-set` | The `DWIN_SET` folder: check, write and read it. |
 | `degus-icl` | ICL image libraries. |
 | `degus-wae` | WAE audio libraries. |
 | `degus-controls` | Touch (13) and display (14) control files. |

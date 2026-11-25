@@ -1,8 +1,8 @@
 [package]
-name = "degus"
+name = "degus-set"
 version.workspace = true
 edition.workspace = true
-description = "Builds the DWIN_SET folder of DWIN T5L displays from Rust"
+description = "Builds and reads the DWIN_SET folder of DWIN T5L displays"
 
 [dependencies]
 degus-config.workspace = true
