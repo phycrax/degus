@@ -74,8 +74,18 @@ The formats it writes, and reads back:
 - font 0, the ASCII font data variables and text controls use, drawn from
   a TrueType or OpenType font with hinting for 1-bit pixels.
 
-Other DGUS controls and the other fonts are TODO, tokens are welcome. A
-simulator that runs a built `DWIN_SET` is planned.
+Other DGUS controls and the other fonts are TODO, tokens are welcome.
+
+## Simulating the display
+
+`degus-sim` runs a `DwinSet`, one built in Rust or one read from a
+`DWIN_SET` folder, without a display. It takes the host's UART bytes,
+touches and time, and gives back the display's answers and uploads, the
+sounds it plays and the screen it draws, so tests can press buttons and
+check VPs and pixels. It draws icons from the set's ICLs and text with the
+set's font 0; characters in other fonts draw as boxes. Where DWIN's guide
+leaves the display's behaviour open, `crates/sim/ASSUMPTIONS.md` lists
+what the simulator picks.
 
 ## Talking to the display
 
@@ -122,6 +132,7 @@ as `degus_set::icl`, `degus_set::wae`, `degus_set::controls`,
 | Crate | |
 |-------|---|
 | `degus-set` | The `DWIN_SET` folder: check, write and read it. |
+| `degus-sim` | Simulates a display running a `DWIN_SET`. |
 | `degus-icl` | ICL image libraries. |
 | `degus-wae` | WAE audio libraries. |
 | `degus-controls` | Touch (13) and display (14) control files. |

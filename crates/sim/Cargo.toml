@@ -1,0 +1,13 @@
+[package]
+name = "degus-sim"
+version.workspace = true
+edition.workspace = true
+description = "Simulates a DWIN T5L display running a DWIN_SET"
+
+[dependencies]
+degus-codec.workspace = true
+degus-set.workspace = true
+thiserror = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+hex-literal.workspace = true
