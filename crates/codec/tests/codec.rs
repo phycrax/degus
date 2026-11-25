@@ -399,6 +399,53 @@ fn writes_data_in_place() {
     assert_eq!(writer.finish(), hex!("5AA5 05 82 1000 3132"));
 }
 
+/// The room `fill` lends ends at the length byte or the buffer, whichever
+/// comes first, less the CRC trailer.
+#[test]
+fn fills_the_room_left() {
+    let room = |buf: &mut [u8], crc: Option<Crc>| {
+        let mut writer = Request::begin_write(buf, Address::Vp(0x1000), crc).unwrap();
+        writer.fill(|room| Ok::<_, ()>(room.len())).unwrap()
+    };
+    // The header, length byte, command and address take 6 bytes.
+    assert_eq!(room(&mut [0u8; MAX_FRAME], Crc::off()), MAX_FRAME - 6);
+    assert_eq!(room(&mut [0u8; MAX_FRAME], Crc::on()), MAX_FRAME - 8);
+    assert_eq!(room(&mut [0u8; 400], Crc::off()), MAX_FRAME - 6);
+    assert_eq!(room(&mut [0u8; 10], Crc::off()), 4);
+    assert_eq!(room(&mut [0u8; 10], Crc::on()), 2);
+
+    let mut buf = [0u8; MAX_FRAME];
+    let mut writer = Request::begin_write(&mut buf, Address::Vp(0x1000), Crc::on()).unwrap();
+    let wrote = writer.fill(|room| {
+        room[..2].copy_from_slice(&hex!("3132"));
+        Ok::<_, ()>(2)
+    });
+    assert_eq!(wrote, Ok(2));
+    // A failed fill appends nothing, whatever it wrote.
+    let failed = writer.fill(|room| {
+        room[..2].copy_from_slice(&hex!("FFFF"));
+        Err("no")
+    });
+    assert_eq!(failed, Err("no"));
+    writer.push(&hex!("3334")).unwrap();
+    assert_eq!(writer.content(), hex!("82 1000 3132 3334"));
+    assert_eq!(
+        request(writer.finish(), Crc::on()),
+        Request::Write {
+            addr: Address::Vp(0x1000),
+            data: &hex!("3132 3334"),
+        }
+    );
+}
+
+#[test]
+#[should_panic(expected = "wrote 5 bytes into a room of 4")]
+fn fill_cannot_claim_more_than_the_room() {
+    let mut buf = [0u8; 10];
+    let mut writer = Request::begin_write(&mut buf, Address::Vp(0x1000), Crc::off()).unwrap();
+    let _ = writer.fill(|_| Ok::<_, ()>(5));
+}
+
 /// A checksum lent from elsewhere, as a CRC peripheral would be.
 #[test]
 fn takes_a_borrowed_checksum() {

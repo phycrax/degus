@@ -135,6 +135,23 @@ impl<'b, K: Checksum> FrameWriter<'b, K> {
         Ok(())
     }
 
+    /// Lends `f` the room left in the frame. Returns how many bytes written.
+    ///
+    /// This lets an encoder write the data in place.
+    ///
+    /// # Panics
+    ///
+    /// If `f` appends more bytes than the room can hold.
+    pub fn fill<E>(&mut self, f: impl FnOnce(&mut [u8]) -> Result<usize, E>) -> Result<usize, E> {
+        // `new` and `reserve` keep `len` within both bounds.
+        let end = (self.buf.len() - self.trailer()).min(OVERHEAD + MAX_CONTENT - self.trailer());
+        let room = end - self.len;
+        let n = f(&mut self.buf[self.len..end])?;
+        assert!(n <= room, "wrote {n} bytes into a room of {room}");
+        self.len += n;
+        Ok(n)
+    }
+
     /// The content pushed so far: the command and data.
     #[must_use]
     pub fn content(&self) -> &[u8] {
