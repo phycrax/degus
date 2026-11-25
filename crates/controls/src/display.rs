@@ -231,8 +231,11 @@ pub struct TextVar {
     pub font_height: u8,
     pub align: TextAlign,
     pub vertical_align: VerticalAlign,
-    /// Adjust character spacing automatically.
-    pub auto_spacing: bool,
+    /// Give each character its whole cell, `font_width` wide, instead of
+    /// fitting the spacing to its shape (DWIN's guide, §7.13.1). The DGUS
+    /// editor's checkbox for this bit reads "adjust character spacing", the
+    /// other way round.
+    pub fixed_width: bool,
     pub char_spacing: u8,
     pub line_spacing: u8,
 }
@@ -253,7 +256,7 @@ impl Default for TextVar {
             font_height: 8,
             align: TextAlign::default(),
             vertical_align: VerticalAlign::default(),
-            auto_spacing: false,
+            fixed_width: false,
             char_spacing: 0,
             line_spacing: 0,
         }
@@ -406,7 +409,7 @@ impl Display {
                 r[25] = text.font;
                 r[26] = text.font_width;
                 r[27] = text.font_height;
-                r[28] = u8::from(text.auto_spacing) << 7
+                r[28] = u8::from(text.fixed_width) << 7
                     | u8::from(text.align) << 5
                     | u8::from(text.vertical_align) << 4
                     | u8::from(text.encoding);
@@ -505,7 +508,7 @@ impl Display {
                 font_height: r[27],
                 align: TextAlign::try_from(r[28] >> 5 & 0x03).ok()?,
                 vertical_align: VerticalAlign::try_from(r[28] >> 4 & 0x01).ok()?,
-                auto_spacing: r[28] & 0x80 != 0,
+                fixed_width: r[28] & 0x80 != 0,
                 char_spacing: r[29],
                 line_spacing: r[30],
             }),

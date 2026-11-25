@@ -97,14 +97,6 @@ fn mark<'a>(code: Code, text: &TextVar, font0: Option<&'a Font0>) -> Mark<'a> {
     }
 }
 
-/// Whether each character takes its whole cell. `degus-controls` names bit
-/// 7 of the encoding byte `auto_spacing`, but the guide (§7.13.1) says a
-/// set bit fixes each character to its cell and a clear bit adjusts the
-/// spacing.
-fn fixed_width(text: &TextVar) -> bool {
-    text.auto_spacing
-}
-
 /// A character placed on a line.
 struct Placed<'a> {
     mark: Mark<'a>,
@@ -121,7 +113,7 @@ pub(crate) fn draw_text(fb: &mut RgbImage, vp: &VpSpace, text: &TextVar, font0: 
     let area = Rect::from_area(text.area);
     let color = rgb565(text.color);
     let line_h = i32::from(text.font_height);
-    let fixed = fixed_width(text);
+    let fixed = text.fixed_width;
 
     // Break into lines at line feeds and at the box's right edge.
     let mut lines: Vec<Vec<Placed>> = vec![Vec::new()];

@@ -362,7 +362,7 @@ fn every_field() -> Controls {
             font_height: 48,
             align: TextAlign::RightToLeft,
             vertical_align: VerticalAlign::Center,
-            auto_spacing: true,
+            fixed_width: true,
             char_spacing: 2,
             line_spacing: 4,
         }

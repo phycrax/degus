@@ -488,7 +488,7 @@ fn draws_numbers_text_and_bars() {
         data.align = Align::Right;
     }
     if let Display::Text(text) = &mut page.display[2] {
-        text.auto_spacing = true;
+        text.fixed_width = true;
         text.char_spacing = 3;
     }
     sim.reload(set);
