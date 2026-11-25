@@ -1,0 +1,20 @@
+[package]
+name = "degus-serde"
+version.workspace = true
+edition.workspace = true
+description = "Encodes and decodes the values DWIN T5L displays hold in their VPs, with serde"
+categories = ["embedded", "no-std", "encoding"]
+
+[dependencies]
+defmt = { version = "1.0.1", optional = true }
+serde = { version = "1.0.228", default-features = false }
+thiserror.workspace = true
+
+[dev-dependencies]
+degus-codec.workspace = true
+hex-literal.workspace = true
+serde = { version = "1.0.228", features = ["derive"] }
+
+[features]
+## Derives `defmt::Format` for the errors.
+defmt = ["dep:defmt"]
