@@ -16,6 +16,7 @@ degus-glyph = { path = "crates/glyph" }
 degus-icl = { path = "crates/icl" }
 degus-serde = { path = "crates/serde" }
 degus-set = { path = "crates/set", default-features = false }
+degus-sim = { path = "crates/sim" }
 degus-wae = { path = "crates/wae" }
 
 crc = "3.4.0"

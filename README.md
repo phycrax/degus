@@ -83,9 +83,22 @@ Other DGUS controls and the other fonts are TODO, tokens are welcome.
 touches and time, and gives back the display's answers and uploads, the
 sounds it plays and the screen it draws, so tests can press buttons and
 check VPs and pixels. It draws icons from the set's ICLs and text with the
-set's font 0; characters in other fonts draw as boxes. Where DWIN's guide
-leaves the display's behaviour open, `crates/sim/ASSUMPTIONS.md` lists
-what the simulator picks.
+set's font 0, if it has one; characters in other fonts draw as boxes.
+Where DWIN's guide leaves the display's behaviour open,
+`crates/sim/ASSUMPTIONS.md` lists what the simulator picks.
+
+The `degus` command opens it in a window:
+
+```sh
+cargo install degus-cli --git https://github.com/phycrax/degus
+degus sim path/to/DWIN_SET --tcp 127.0.0.1:5000
+```
+
+Clicks are touches. The window shows the pages, VP watches, the VP
+memory, and a log of the frames between host and display, and plays the
+display's sounds. It reloads the folder when a build rewrites it, keeping
+the page and the VPs. Firmware connects as the host over `--tcp` or
+`--serial`, and `--size` gives the screen size when the set doesn't.
 
 ## Talking to the display
 
@@ -133,6 +146,7 @@ as `degus_set::icl`, `degus_set::wae`, `degus_set::controls`,
 |-------|---|
 | `degus-set` | The `DWIN_SET` folder: check, write and read it. |
 | `degus-sim` | Simulates a display running a `DWIN_SET`. |
+| `degus-cli` | The `degus` command: `degus sim` runs a `DWIN_SET` in a window. |
 | `degus-icl` | ICL image libraries. |
 | `degus-wae` | WAE audio libraries. |
 | `degus-controls` | Touch (13) and display (14) control files. |
