@@ -1,4 +1,4 @@
-//! Reading the set `degus sim` runs, again whenever it changes.
+//! Reading the set `degus sim` runs, at start and on reload.
 
 use std::path::{Path, PathBuf};
 

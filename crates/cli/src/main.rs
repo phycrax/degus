@@ -10,7 +10,6 @@ use degus_set::Size;
 mod link;
 mod load;
 mod speaker;
-mod watch;
 mod window;
 
 #[derive(Parser)]
@@ -23,7 +22,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Runs a DWIN_SET folder on a simulated display, in a window. Clicks
-    /// are touches, and the window reloads the folder when it changes.
+    /// are touches.
     Sim(SimArgs),
 }
 

@@ -96,8 +96,8 @@ degus sim path/to/DWIN_SET --tcp 127.0.0.1:5000
 
 Clicks are touches. The window shows the pages, VP watches, the VP
 memory, and a log of the frames between host and display, and plays the
-display's sounds. It reloads the folder when a build rewrites it, keeping
-the page and the VPs. Firmware connects as the host over `--tcp` or
+display's sounds. Its reload button reads the folder again, keeping the
+page and the VPs. Firmware connects as the host over `--tcp` or
 `--serial`, and `--size` gives the screen size when the set doesn't.
 
 ## Talking to the display

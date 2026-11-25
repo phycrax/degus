@@ -21,7 +21,6 @@ use crate::SimArgs;
 use crate::link::{Link, LinkEvent, Waker};
 use crate::load::Source;
 use crate::speaker::Speaker;
-use crate::watch::Watcher;
 
 /// Lines the log keeps.
 const LOG_LINES: usize = 5000;
@@ -60,8 +59,6 @@ pub(crate) fn run(args: SimArgs) -> Result<(), String> {
             Link::serial(port, baud, wake.clone()).map_err(|e| format!("--serial {port}: {e}"))?;
         links.push(link);
     }
-    let watcher = Watcher::new(source.folder(), wake)
-        .map_err(|e| format!("{}: {e}", source.folder().display()))?;
 
     let title = format!("{} - degus sim", source.root.display());
     let screen = sim.screen();
@@ -76,7 +73,7 @@ pub(crate) fn run(args: SimArgs) -> Result<(), String> {
         options,
         Box::new(move |cc| {
             let _ = ctx.set(cc.egui_ctx.clone());
-            Ok(Box::new(App::new(cc, sim, source, watcher, links)))
+            Ok(Box::new(App::new(cc, sim, source, links)))
         }),
     )
     .map_err(|e| format!("the window failed ({screen} screen): {e}"))
@@ -184,7 +181,6 @@ struct Watch {
 struct App {
     sim: Sim,
     source: Source,
-    watcher: Watcher,
     links: Vec<Link>,
     start: Instant,
     last_tick: Instant,
@@ -212,19 +208,12 @@ struct App {
 }
 
 impl App {
-    fn new(
-        cc: &eframe::CreationContext<'_>,
-        sim: Sim,
-        source: Source,
-        watcher: Watcher,
-        links: Vec<Link>,
-    ) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, sim: Sim, source: Source, links: Vec<Link>) -> Self {
         let mut app = Self {
             host_frames: Accumulator::new([0; MAX_CONTENT], crc(&sim)),
             pages: pages(&sim),
             sim,
             source,
-            watcher,
             links,
             start: Instant::now(),
             last_tick: Instant::now(),
@@ -802,9 +791,6 @@ impl eframe::App for App {
         let now = Instant::now();
         self.sim.advance(now - self.last_tick);
         self.last_tick = now;
-        if self.watcher.changed() {
-            self.reload();
-        }
         self.poll_links();
         self.drain();
         let busy = self.sim.is_pressed() || self.sim.input_text().is_some();
