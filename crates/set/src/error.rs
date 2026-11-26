@@ -46,6 +46,13 @@ pub enum Error {
          large file runs into the next numbers"
     )]
     FlashOverlap { first: String, second: String },
+    /// A file ends past the device's [`flash_mb`](crate::Device::flash_mb)
+    /// megabytes of flash.
+    #[error(
+        "{name} ends past the device's {flash_mb} MB flash: a file takes 256 KB per file \
+         number, from its own number on"
+    )]
+    PastFlash { name: String, flash_mb: u16 },
 }
 
 impl fmt::Debug for Error {

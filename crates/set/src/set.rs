@@ -20,6 +20,9 @@ pub const FOLDER: &str = "DWIN_SET";
 /// Flash bytes per file number: the display stores file N at N × 256 KB.
 pub const SLOT_SIZE: u32 = 256 * 1024;
 
+/// Bytes per megabyte, the unit of [`Device::flash_mb`].
+const MB: u64 = 1024 * 1024;
+
 /// A size in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Size {
@@ -48,14 +51,20 @@ pub struct Device {
     pub screen: Size,
     /// Sets the largest icon an ICL may hold.
     pub chip: Chip,
+    /// The megabytes of flash the display stores files in, which every
+    /// numbered file must end within: file N takes the flash from
+    /// N × [`SLOT_SIZE`] on. The size depends on the model, so `None`
+    /// leaves the end unchecked.
+    pub flash_mb: Option<u16>,
 }
 
 impl Device {
-    /// A display with a T5L2 chip.
+    /// A display with a T5L2 chip and flash of unknown size.
     pub const fn new(screen: Size) -> Self {
         Self {
             screen,
             chip: Chip::T5L2,
+            flash_mb: None,
         }
     }
 }
@@ -206,8 +215,9 @@ impl DwinSet {
     /// name.
     ///
     /// Fails on a part that cannot be encoded, a bad or repeated file name,
-    /// and files that overlap in flash. Unlike [`DwinSet::write`], it does
-    /// not run [`DwinSet::check`].
+    /// files that overlap in flash, and a file past the end of the device's
+    /// [flash](Device::flash_mb). Unlike [`DwinSet::write`], it does not run
+    /// [`DwinSet::check`].
     pub fn to_files(&self) -> Result<Vec<File>> {
         let mut files = Vec::new();
         if let Some(config) = &self.config {
@@ -235,7 +245,8 @@ impl DwinSet {
             files.push(File::new(name.clone(), bytes.clone()));
         }
         let entries = files.iter().map(|file| (&*file.name, file.bytes.len()));
-        if let Some((name, problem)) = layout_problems(entries).into_iter().next() {
+        let problems = layout_problems(entries, self.device.flash_mb);
+        if let Some((name, problem)) = problems.into_iter().next() {
             return Err(match problem {
                 LayoutProblem::Name(reason) => Error::FileName { name, reason },
                 LayoutProblem::SameName(first) => Error::Duplicate {
@@ -246,6 +257,7 @@ impl DwinSet {
                     first,
                     second: name,
                 },
+                LayoutProblem::PastFlash { flash_mb, .. } => Error::PastFlash { name, flash_mb },
             });
         }
         sort(&mut files);
@@ -296,12 +308,16 @@ pub(crate) enum LayoutProblem {
     SameName(String),
     /// The file starts in the flash this earlier file takes.
     Overlap(String),
+    /// The file ends past the end of the device's `flash_mb` megabytes, in
+    /// file number `last`.
+    PastFlash { flash_mb: u16, last: u64 },
 }
 
 /// The problems of each file, given by name and length, in the order the
-/// files come.
+/// files come. `flash_mb` is the device's, see [`Device::flash_mb`].
 pub(crate) fn layout_problems<'a>(
     files: impl IntoIterator<Item = (&'a str, usize)>,
+    flash_mb: Option<u16>,
 ) -> Vec<(String, LayoutProblem)> {
     let files: Vec<_> = files.into_iter().collect();
     let mut problems = Vec::new();
@@ -336,8 +352,19 @@ pub(crate) fn layout_problems<'a>(
         if furthest.is_none_or(|(reach, _)| end > reach) {
             furthest = Some((end, name));
         }
+        if let Some(flash_mb) = flash_mb
+            && end > u64::from(flash_mb) * MB
+        {
+            let last = (end - 1) / u64::from(SLOT_SIZE);
+            problems.push((name.to_owned(), LayoutProblem::PastFlash { flash_mb, last }));
+        }
     }
     problems
+}
+
+/// The last file number in `flash_mb` megabytes of flash.
+pub(crate) fn last_number(flash_mb: u16) -> u64 {
+    (u64::from(flash_mb) * MB / u64::from(SLOT_SIZE)).saturating_sub(1)
 }
 
 /// Why `name` cannot be a file name on the SD card, if it cannot.

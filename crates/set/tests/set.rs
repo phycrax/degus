@@ -375,6 +375,45 @@ fn reports_file_names_and_flash_overlaps() {
 }
 
 #[test]
+fn checks_files_against_the_end_of_flash() {
+    // Without a flash size, no file is past its end.
+    let mut set = panel();
+    set.files.insert("200_far.bin".into(), vec![1]);
+    assert_eq!(check(&set), Vec::<String>::new());
+    set.to_files().unwrap();
+
+    // 16 MB holds file numbers 0 to 63, so the last may fill 63.
+    let mut set = panel();
+    set.device.flash_mb = Some(16);
+    set.files.insert("63_last.bin".into(), vec![0; 256 * 1024]);
+    assert_eq!(check(&set), Vec::<String>::new());
+    set.to_files().unwrap();
+
+    set.files
+        .insert("63_last.bin".into(), vec![0; 256 * 1024 + 1]);
+    set.files.insert("70_far.bin".into(), vec![1]);
+    assert_eq!(
+        check(&set),
+        [
+            "error: 63_last.bin: ends in file number 64, past the device's 16 MB flash, which \
+             ends in file number 63",
+            "error: 70_far.bin: ends in file number 70, past the device's 16 MB flash, which \
+             ends in file number 63",
+        ]
+    );
+    let error = set.to_files().unwrap_err();
+    assert!(
+        matches!(&error, Error::PastFlash { name, flash_mb: 16 } if name == "63_last.bin"),
+        "{error}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "63_last.bin ends past the device's 16 MB flash: a file takes 256 KB per file number, \
+         from its own number on"
+    );
+}
+
+#[test]
 fn reports_what_the_configuration_names_that_the_set_lacks() {
     let mut set = panel();
     set.config = Some(Config {

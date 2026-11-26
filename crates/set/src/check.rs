@@ -12,7 +12,7 @@ use crate::file::{
     CONFIG_FILE, DISPLAY_FILE, FONT0_FILE, Role, TOUCH_FILE, icl_name, is_config_file, number,
     wae_name,
 };
-use crate::set::{DwinSet, LayoutProblem, layout_problems};
+use crate::set::{DwinSet, LayoutProblem, last_number, layout_problems};
 
 /// The background ICL of a display whose configuration names no other.
 const DEFAULT_BACKGROUND_ICL: u8 = 32;
@@ -223,7 +223,7 @@ impl<'a> Checker<'a> {
         }
 
         let entries = files.iter().map(|(name, len)| (name.as_str(), *len));
-        for (name, problem) in layout_problems(entries) {
+        for (name, problem) in layout_problems(entries, set.device.flash_mb) {
             let message = match problem {
                 LayoutProblem::Name(reason) => {
                     format!("is not a file name for DWIN_SET: {reason}")
@@ -234,6 +234,11 @@ impl<'a> Checker<'a> {
                 LayoutProblem::Overlap(first) => format!(
                     "overlaps {first} in flash: a file takes 256 KB per file number, so a \
                      large file runs into the next numbers"
+                ),
+                LayoutProblem::PastFlash { flash_mb, last } => format!(
+                    "ends in file number {last}, past the device's {flash_mb} MB flash, which \
+                     ends in file number {}",
+                    last_number(flash_mb)
                 ),
             };
             self.error(Location::File(name), message);
