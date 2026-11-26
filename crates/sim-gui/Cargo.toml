@@ -1,0 +1,22 @@
+[package]
+name = "degus-sim-gui"
+version.workspace = true
+edition.workspace = true
+description = "A simulated DWIN T5L display in an eframe app: UART, touch screen and speaker"
+
+[dependencies]
+degus-set.workspace = true
+degus-sim.workspace = true
+eframe = { version = "0.37.0", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+parking_lot = "0.12.5"
+rodio = { version = "0.23.0", default-features = false, features = ["playback"], optional = true }
+
+[dev-dependencies]
+degus-codec.workspace = true
+
+[features]
+default = ["audio"]
+## Plays the display's clips and beeps on the default output device.
+audio = ["dep:rodio"]
+## Lets an app save its settings with eframe's storage.
+persistence = ["eframe/persistence"]

@@ -1,18 +1,23 @@
-//! The display's speaker and buzzer, on the host's default output device.
+//! The display's speaker and buzzer, on the default output device.
 //!
-//! The device lives on a thread of its own, so the window never waits on
-//! it. Without an output device, or without the `audio` feature, the window
-//! stays silent and still logs every sound.
+//! The device lives on a thread of its own, so playing never waits for it.
+//! Without an output device, or without the `audio` feature, the display
+//! stays silent and its sounds are still logged.
 
 use degus_sim::Sound;
 
-/// Plays [`Sound`]s. A new clip cuts off the one playing, as on the panel;
-/// the buzzer plays beside it.
-pub(crate) struct Speaker {
+/// Plays [`Sound`]s, at a master volume. A new clip cuts off the one
+/// playing, as on the display; the buzzer plays beside it.
+///
+/// Clones play on the same device, so that one can go to
+/// [`SimThread::set_speaker`](crate::SimThread::set_speaker) and another
+/// can set the volume. The device closes with the last of them.
+#[derive(Clone)]
+pub struct Speaker {
     #[cfg(feature = "audio")]
     commands: std::sync::mpsc::Sender<Command>,
     #[cfg(feature = "audio")]
-    problems: std::sync::mpsc::Receiver<String>,
+    problems: std::sync::Arc<parking_lot::Mutex<std::sync::mpsc::Receiver<String>>>,
 }
 
 #[cfg(feature = "audio")]
@@ -23,7 +28,8 @@ enum Command {
 }
 
 impl Speaker {
-    /// Opens the default output device at `volume`, 0-1.
+    /// Opens the default output device at `volume`, 0-1. Without the
+    /// `audio` feature, it plays nothing.
     #[cfg(feature = "audio")]
     pub fn new(volume: f32) -> Self {
         let (commands, receiver) = std::sync::mpsc::channel();
@@ -35,11 +41,15 @@ impl Speaker {
         if let Err(error) = spawned {
             let _ = report.send(format!("no audio thread, sounds are only logged: {error}"));
         }
-        Self { commands, problems }
+        Self {
+            commands,
+            problems: std::sync::Arc::new(parking_lot::Mutex::new(problems)),
+        }
     }
 
     #[cfg(not(feature = "audio"))]
-    pub fn new(_volume: f32) -> Self {
+    pub fn new(volume: f32) -> Self {
+        let _ = volume;
         Self {}
     }
 
@@ -61,7 +71,7 @@ impl Speaker {
     /// Problems since the last call, such as a missing output device.
     pub fn problems(&self) -> Vec<String> {
         #[cfg(feature = "audio")]
-        return self.problems.try_iter().collect();
+        return self.problems.lock().try_iter().collect();
         #[cfg(not(feature = "audio"))]
         Vec::new()
     }
@@ -190,7 +200,7 @@ mod device {
         #[test]
         #[ignore = "needs an audio output device"]
         fn plays_on_the_default_device() {
-            let speaker = crate::speaker::Speaker::new(0.5);
+            let speaker = crate::Speaker::new(0.5);
             speaker.play(Sound::Beep {
                 length: Duration::from_millis(200),
                 buzzer: degus_set::config::Buzzer::default(),

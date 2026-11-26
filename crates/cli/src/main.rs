@@ -7,9 +7,12 @@ use std::process::ExitCode;
 use clap::{Args, Parser, Subcommand};
 use degus_set::Size;
 
+mod command;
 mod link;
 mod load;
-mod speaker;
+mod log;
+mod pages;
+mod watch;
 mod window;
 
 #[derive(Parser)]

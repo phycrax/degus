@@ -100,6 +100,27 @@ display's sounds. Its reload button reads the folder again, keeping the
 page and the VPs. Firmware connects as the host over `--tcp` or
 `--serial`, and `--size` gives the screen size when the set doesn't.
 
+`degus-sim-gui` puts the display itself into any eframe app, such as
+firmware built for the PC that shows its display beside its own controls.
+It looks and acts like a panel on the desk:
+
+- `SimThread` runs the simulator on a thread of its own, as a panel runs
+  on its own chip, so that it answers the host in time however busy the
+  window is.
+- The host talks to it over its `Uart`, which reads and writes like a
+  serial port.
+- `Screen` shows it, dimmed by the backlight, and turns the pointer into
+  touches. It never takes the keyboard focus, so the app's keys stay the
+  app's.
+- `Speaker` plays its sounds.
+
+Tools that look inside, as `degus sim` does, read the simulator with
+`SimThread::lock`, change it with `update`, and watch the UART and the
+display's events with `monitor`. The crate re-exports `eframe` and
+`egui`, so that the app builds with the same ones.
+`crates/sim-gui/examples/embed.rs` shows a set built in code beside a
+panel of the app's own.
+
 ## Talking to the display
 
 `degus-driver` is the firmware's side of the UART link, for async firmware
@@ -146,6 +167,7 @@ as `degus_set::icl`, `degus_set::wae`, `degus_set::controls`,
 |-------|---|
 | `degus-set` | The `DWIN_SET` folder: check, write and read it. |
 | `degus-sim` | Simulates a display running a `DWIN_SET`. |
+| `degus-sim-gui` | A simulated display in an eframe app: UART, touch screen and speaker. |
 | `degus-cli` | The `degus` command: `degus sim` runs a `DWIN_SET` in a window. |
 | `degus-icl` | ICL image libraries. |
 | `degus-wae` | WAE audio libraries. |
