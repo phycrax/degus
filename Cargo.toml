@@ -22,7 +22,7 @@ degus-wae = { path = "crates/wae" }
 
 crc = "3.4.0"
 defmt = "1.0.1"
-embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "21d9a9a798ac414d2e5f3b6fb8174fed4c0f5db3" }
+embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "73d6f6c376d01e350e3270d75c46a6d636356905" }
 embedded-io-async = "0.7.0"
 hex-literal = "1.1.0"
 serde = { version = "1.0.228", default-features = false }
