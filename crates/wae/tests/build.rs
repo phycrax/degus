@@ -1,3 +1,4 @@
+use std::assert_matches;
 use std::f32::consts::TAU;
 
 use crc::{CRC_16_MODBUS, Crc};
@@ -224,15 +225,15 @@ fn rejects_bad_input() {
     let mut builder = WaeBuilder::new(WaeOptions::default());
     let empty = builder.build().unwrap();
     assert_eq!(empty, Wae::new(SampleFormat::Pcm16));
-    assert!(matches!(empty.to_bytes(), Err(Error::Empty)));
+    assert_matches!(empty.to_bytes(), Err(Error::Empty));
     builder.insert(0, samples(32_000, &[]));
-    assert!(matches!(builder.build(), Err(Error::Clip { id: 0, .. })));
+    assert_matches!(builder.build(), Err(Error::Clip { id: 0, .. }));
     builder.insert(0, ClipSource::Encoded(b"not audio".to_vec()));
-    assert!(matches!(builder.build(), Err(Error::Clip { id: 0, .. })));
+    assert_matches!(builder.build(), Err(Error::Clip { id: 0, .. }));
 
     let mut wae = Wae::new(SampleFormat::Pcm16);
     wae.clips.insert(4, Vec::new());
-    assert!(matches!(wae.to_bytes(), Err(Error::Clip { id: 4, .. })));
+    assert_matches!(wae.to_bytes(), Err(Error::Clip { id: 4, .. }));
 }
 
 #[test]
@@ -281,13 +282,13 @@ fn rejects_damaged_files() {
         Wae::from_bytes(&bytes)
     };
 
-    assert!(matches!(Wae::from_bytes(b"DGUS_3"), Err(Error::NotWae)));
-    assert!(matches!(damaged(0, b'X'), Err(Error::NotWae)));
-    assert!(matches!(damaged(12, 2), Err(Error::Version(2))));
+    assert_matches!(Wae::from_bytes(b"DGUS_3"), Err(Error::NotWae));
+    assert_matches!(damaged(0, b'X'), Err(Error::NotWae));
+    assert_matches!(damaged(12, 2), Err(Error::Version(2)));
     // A changed byte no longer matches the CRC.
-    assert!(matches!(damaged(4096, 0x55), Err(Error::Damaged(_))));
-    assert!(matches!(
+    assert_matches!(damaged(4096, 0x55), Err(Error::Damaged(_)));
+    assert_matches!(
         Wae::from_bytes(&bytes[..bytes.len() - 1]),
         Err(Error::Damaged(_))
-    ));
+    );
 }

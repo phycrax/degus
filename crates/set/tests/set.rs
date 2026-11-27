@@ -1,3 +1,4 @@
+use std::assert_matches;
 use std::ops::RangeInclusive;
 use std::path::PathBuf;
 
@@ -165,7 +166,7 @@ fn write_refuses_a_set_with_errors() {
         KeyCode::new(0x1001, 1),
     ));
     let error = set.write(&dir).unwrap_err();
-    assert!(matches!(&error, Error::Check(diagnostics) if diagnostics.len() == 1));
+    assert_matches!(&error, Error::Check(diagnostics) if diagnostics.len() == 1);
     assert_eq!(
         error.to_string(),
         "the set has 1 error\n\
@@ -317,7 +318,7 @@ fn reports_values_the_files_cannot_hold() {
             "error: page 1, touch control 0: target bit 16 is not in 0-15",
         ]
     );
-    assert!(matches!(set.to_files(), Err(Error::Config(_))));
+    assert_matches!(set.to_files(), Err(Error::Config(_)));
 
     let mut set = panel();
     set.controls.page_mut(0).display.push(
@@ -331,7 +332,7 @@ fn reports_values_the_files_cannot_hold() {
         check(&set),
         ["error: page 0, display control 1: unit \"°C\" must be ASCII and at most 11 bytes"]
     );
-    assert!(matches!(set.to_files(), Err(Error::Controls(_))));
+    assert_matches!(set.to_files(), Err(Error::Controls(_)));
 }
 
 #[test]
@@ -364,14 +365,14 @@ fn reports_file_names_and_flash_overlaps() {
           number, so a large file runs into the next numbers"
         ]
     );
-    assert!(matches!(
+    assert_matches!(
         set.to_files(),
         Err(Error::FlashOverlap { first, second }) if first == "50_big.bin" && second == "51_next.bin"
-    ));
+    );
 
     let mut set = panel();
     set.files.insert("a:b".into(), vec![1]);
-    assert!(matches!(set.to_files(), Err(Error::FileName { name, .. }) if name == "a:b"));
+    assert_matches!(set.to_files(), Err(Error::FileName { name, .. }) if name == "a:b");
 }
 
 #[test]
@@ -489,7 +490,7 @@ fn empty_libraries_cannot_be_written() {
         check(&set),
         ["error: 41.icl: has no icons", "error: 49.wae: has no clips"]
     );
-    assert!(matches!(set.to_files(), Err(Error::Icl { file: 41, .. })));
+    assert_matches!(set.to_files(), Err(Error::Icl { file: 41, .. }));
 }
 
 #[test]
@@ -570,10 +571,10 @@ fn reads_font_0_by_its_number_and_length() {
         File::new("0_DWIN_ASC.HZK", font.to_bytes()),
         File::new("0.bin", vec![1]),
     ];
-    assert!(matches!(
+    assert_matches!(
         DwinSet::from_files(two, device),
         Err(Error::Duplicate { .. })
-    ));
+    );
 }
 
 #[test]
@@ -689,11 +690,11 @@ fn font_0_takes_files_0_to_11() {
         diagnostics[0].starts_with("error: 11_data.bin: overlaps 0_DWIN_ASC.HZK in flash"),
         "{diagnostics:#?}"
     );
-    assert!(matches!(
+    assert_matches!(
         set.to_files(),
         Err(Error::FlashOverlap { first, second })
             if first == "0_DWIN_ASC.HZK" && second == "11_data.bin"
-    ));
+    );
 }
 
 #[test]
@@ -703,28 +704,28 @@ fn rejects_files_that_do_not_read() {
         [File::new("32.icl", vec![]), File::new("32_x.ICL", vec![])],
         device,
     );
-    assert!(matches!(
+    assert_matches!(
         duplicate,
         Err(Error::Duplicate { first, second }) if first == "32.icl" && second == "32_x.ICL"
-    ));
+    );
     let configs = [
         File::new("T5LCFG.CFG", vec![]),
         File::new("t5lcfg2.cfg", vec![]),
     ];
-    assert!(matches!(
+    assert_matches!(
         DwinSet::from_files(configs, device),
         Err(Error::Duplicate { .. })
-    ));
-    assert!(matches!(
+    );
+    assert_matches!(
         DwinSet::from_files([File::new("40.icl", b"DGUS_2".to_vec())], device),
         Err(Error::Icl { file: 40, .. })
-    ));
-    assert!(matches!(
+    );
+    assert_matches!(
         DwinSet::from_files([File::new("T5LCFG.CFG", vec![0; 4])], device),
         Err(Error::Config(_))
-    ));
-    assert!(matches!(
+    );
+    assert_matches!(
         DwinSet::read(temp_dir("rejects_files_that_do_not_read"), device),
         Err(Error::Io { .. })
-    ));
+    );
 }

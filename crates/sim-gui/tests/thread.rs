@@ -3,6 +3,7 @@
 
 mod support;
 
+use std::assert_matches;
 use std::io::{ErrorKind, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -125,10 +126,10 @@ fn the_monitor_sees_the_traffic_and_the_events_in_order() {
     let seen = seen_until(&monitor, |kind| *kind == page);
     let upload = ActivityKind::ToHost(frame(&upload(KEY_VP, &[KEY_VALUE])));
     // The touch sound between them.
-    assert!(matches!(
+    assert_matches!(
         &seen[..],
         [first, ActivityKind::Event(Event::Sound(_)), last] if *first == upload && *last == page
-    ));
+    );
 }
 
 #[test]

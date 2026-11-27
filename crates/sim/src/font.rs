@@ -98,6 +98,8 @@ impl<'a> Mark<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     fn font0() -> Font0 {
@@ -111,28 +113,19 @@ mod tests {
     #[test]
     fn takes_glyphs_from_font_0_and_boxes_the_rest() {
         let font = font0();
-        assert!(matches!(
-            Mark::new(Some(&font), 0, 'I'.into(), 4, 8),
-            Mark::Glyph(_)
-        ));
+        assert_matches!(Mark::new(Some(&font), 0, 'I'.into(), 4, 8), Mark::Glyph(_));
         // Another font, a width font 0 lacks, a code past ASCII.
         for (font_id, code, w) in [(1, 'I' as u32, 4), (0, 'I' as u32, 3), (0, '中' as u32, 4)] {
             let mark = Mark::new(Some(&font), font_id, code, w, 8);
-            assert!(matches!(mark, Mark::Box { .. }), "{font_id} {code} {w}");
+            assert_matches!(mark, Mark::Box { .. }, "{font_id} {code} {w}");
         }
-        assert!(matches!(
+        assert_matches!(
             Mark::new(Some(&font), 1, ' '.into(), 4, 8),
             Mark::Blank { w: 4 }
-        ));
+        );
         // Without font 0, font 0 draws nothing but keeps its cell.
-        assert!(matches!(
-            Mark::new(None, 0, 'I'.into(), 4, 8),
-            Mark::Blank { w: 4 }
-        ));
-        assert!(matches!(
-            Mark::new(None, 1, 'I'.into(), 4, 8),
-            Mark::Box { .. }
-        ));
+        assert_matches!(Mark::new(None, 0, 'I'.into(), 4, 8), Mark::Blank { w: 4 });
+        assert_matches!(Mark::new(None, 1, 'I'.into(), 4, 8), Mark::Box { .. });
     }
 
     #[test]

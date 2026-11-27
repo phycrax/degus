@@ -1,6 +1,8 @@
 #[path = "support/ttf.rs"]
 mod ttf;
 
+use std::assert_matches;
+
 use degus_glyph::{Error, Face, Glyph, Hinting};
 use ttf::{TestFont, glyph, rect};
 
@@ -144,16 +146,7 @@ fn hinted_glyphs_draw() {
 #[test]
 fn bad_sizes_and_files_are_errors() {
     let face = face();
-    assert!(matches!(
-        face.scaler(0.0, Hinting::None),
-        Err(Error::Size(_))
-    ));
-    assert!(matches!(
-        face.scaler(f32::NAN, Hinting::Mono),
-        Err(Error::Size(_))
-    ));
-    assert!(matches!(
-        Face::new(b"not a font".to_vec()),
-        Err(Error::NotFont(_))
-    ));
+    assert_matches!(face.scaler(0.0, Hinting::None), Err(Error::Size(_)));
+    assert_matches!(face.scaler(f32::NAN, Hinting::Mono), Err(Error::Size(_)));
+    assert_matches!(Face::new(b"not a font".to_vec()), Err(Error::NotFont(_)));
 }

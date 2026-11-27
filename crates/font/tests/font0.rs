@@ -1,3 +1,5 @@
+use std::assert_matches;
+
 use degus_font::{Bitmap, Error, FONT0_LEN, Font0};
 
 /// Where the spec puts the glyph of `code` at `width`.
@@ -107,31 +109,28 @@ fn glyphs_are_listed_by_width_then_code() {
 
 #[test]
 fn bad_files_widths_codes_and_sizes_are_errors() {
-    assert!(matches!(
+    assert_matches!(
         Font0::from_bytes(&vec![0; FONT0_LEN - 1]),
         Err(Error::Font0Length(len)) if len == FONT0_LEN - 1
-    ));
+    );
     let mut font = Font0::new();
-    assert!(matches!(
-        font.set(3, 0, Bitmap::new(3, 6)),
-        Err(Error::Font0Width(3))
-    ));
-    assert!(matches!(
+    assert_matches!(font.set(3, 0, Bitmap::new(3, 6)), Err(Error::Font0Width(3)));
+    assert_matches!(
         font.set(65, 0, Bitmap::new(65, 130)),
         Err(Error::Font0Width(65))
-    ));
-    assert!(matches!(
+    );
+    assert_matches!(
         font.set(8, 128, Bitmap::new(8, 16)),
         Err(Error::Font0Code(128))
-    ));
-    assert!(matches!(
+    );
+    assert_matches!(
         font.set(8, 65, Bitmap::new(8, 15)),
         Err(Error::GlyphSize {
             width: 8,
             got_width: 8,
             got_height: 15
         })
-    ));
+    );
     assert_eq!(font.glyph(3, 0), None);
     assert_eq!(font.glyph(8, 128), None);
     let error = font.set(8, 65, Bitmap::new(9, 16)).unwrap_err();
@@ -143,7 +142,7 @@ fn bad_files_widths_codes_and_sizes_are_errors() {
 
 #[test]
 fn bitmaps_check_their_rows() {
-    assert!(matches!(
+    assert_matches!(
         Bitmap::from_rows(12, 2, &[0; 3]),
         Err(Error::Rows {
             width: 12,
@@ -151,7 +150,7 @@ fn bitmaps_check_their_rows() {
             expected: 4,
             len: 3
         })
-    ));
+    );
     let bitmap = Bitmap::from_rows(3, 2, &[0xA0, 0x40]).unwrap();
     assert_eq!(format!("{bitmap:#?}"), "Bitmap(3x2)\n#.#\n.#.");
     assert_eq!(format!("{bitmap:?}"), "Bitmap(3x2)");

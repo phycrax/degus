@@ -1,3 +1,5 @@
+use std::assert_matches;
+
 use crc::{CRC_16_MODBUS, Crc};
 use degus_icl::{
     Chip, Error, Icl, IclBuilder, IclOptions, IconSource, OversizePolicy, Subsampling,
@@ -266,17 +268,17 @@ fn encoded_sources_are_decoded() {
     assert_eq!((icl.icons[&5].width(), icl.icons[&5].height()), (12, 8));
 
     builder.insert(6, IconSource::Encoded(b"not an image".to_vec()));
-    assert!(matches!(
+    assert_matches!(
         builder.build(),
         Err(Error::Icon { id: 6, source }) if matches!(*source, Error::Decode(_))
-    ));
+    );
 }
 
 #[test]
 fn an_empty_icl_cannot_be_written() {
     let icl = IclBuilder::default().build().unwrap();
     assert_eq!(icl, Icl::new());
-    assert!(matches!(icl.to_bytes(32), Err(Error::Empty)));
+    assert_matches!(icl.to_bytes(32), Err(Error::Empty));
 }
 
 #[test]
@@ -324,17 +326,14 @@ fn rejects_what_it_cannot_read() {
         Icl::from_bytes(&bytes)
     };
 
-    assert!(matches!(Icl::from_bytes(b"DGUS_2"), Err(Error::NotIcl)));
-    assert!(matches!(changed(5, b'2'), Err(Error::NotIcl)));
-    assert!(matches!(changed(12, 3), Err(Error::Version(3))));
-    assert!(matches!(changed(15, 1), Err(Error::Encrypted(1))));
+    assert_matches!(Icl::from_bytes(b"DGUS_2"), Err(Error::NotIcl));
+    assert_matches!(changed(5, b'2'), Err(Error::NotIcl));
+    assert_matches!(changed(12, 3), Err(Error::Version(3)));
+    assert_matches!(changed(15, 1), Err(Error::Encrypted(1)));
     // A changed byte no longer matches the CRC.
-    assert!(matches!(
-        changed(bytes.len() - 20, 0x55),
-        Err(Error::Damaged(_))
-    ));
-    assert!(matches!(
+    assert_matches!(changed(bytes.len() - 20, 0x55), Err(Error::Damaged(_)));
+    assert_matches!(
         Icl::from_bytes(&bytes[..bytes.len() - 4]),
         Err(Error::Damaged(_))
-    ));
+    );
 }
