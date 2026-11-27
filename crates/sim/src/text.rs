@@ -154,16 +154,13 @@ pub(crate) fn draw_text(fb: &mut RgbImage, vp: &VpSpace, text: &TextVar, font0: 
                 advance: cell + i32::from(text.char_spacing),
             },
         };
-        let line = lines.last_mut().expect("there is always a line");
+        let mut line = lines.last_mut().expect("there is always a line");
         if !line.is_empty() && x + placed.width > area.w {
-            lines.push(Vec::new());
+            line = lines.push_mut(Vec::new());
             x = 0;
         }
         x += placed.advance;
-        lines
-            .last_mut()
-            .expect("there is always a line")
-            .push(placed);
+        line.push(placed);
     }
     let line_width = |line: &[Placed]| -> i32 {
         match line.split_last() {
