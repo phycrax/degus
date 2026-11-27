@@ -18,11 +18,11 @@ pub(crate) enum Number {
 pub(crate) fn read_number(vp: &VpSpace, at: u16, data_type: DataType) -> Number {
     use Number::{Float, Int};
     match data_type {
-        DataType::I16 => Int((vp.get(at) as i16).into()),
-        DataType::I32 => Int((vp.u32(at) as i32).into()),
+        DataType::I16 => Int(vp.get(at).cast_signed().into()),
+        DataType::I32 => Int(vp.u32(at).cast_signed().into()),
         DataType::HighByte => Int(vp.high(at).into()),
         DataType::LowByte => Int(vp.low(at).into()),
-        DataType::I64 => Int((vp.u64(at) as i64).into()),
+        DataType::I64 => Int(vp.u64(at).cast_signed().into()),
         DataType::U16 => Int(vp.get(at).into()),
         DataType::U32 => Int(vp.u32(at).into()),
         DataType::F32 => Float(f32::from_bits(vp.u32(at)).into()),
@@ -118,11 +118,15 @@ pub(crate) fn input_write(
         (0..n).rev().map(|i| (bits >> (16 * i)) as u16).collect()
     };
     Some(match data_type {
-        InputDataType::I16 => InputWrite::Words(vec![i16::try_from(value).ok()? as u16]),
-        InputDataType::I32 => InputWrite::Words(words(i32::try_from(value).ok()? as u32 as u64, 2)),
+        InputDataType::I16 => InputWrite::Words(vec![i16::try_from(value).ok()?.cast_unsigned()]),
+        InputDataType::I32 => {
+            InputWrite::Words(words(i32::try_from(value).ok()?.cast_unsigned().into(), 2))
+        }
         InputDataType::HighByte => InputWrite::HighByte(u8::try_from(value).ok()?),
         InputDataType::LowByte => InputWrite::LowByte(u8::try_from(value).ok()?),
-        InputDataType::I64 => InputWrite::Words(words(i64::try_from(value).ok()? as u64, 4)),
+        InputDataType::I64 => {
+            InputWrite::Words(words(i64::try_from(value).ok()?.cast_unsigned(), 4))
+        }
         InputDataType::Float => {
             let scale = 10f64.powi(i32::from(decimal_digits.min(MAX_DIGITS)));
             let float = (value as f64 / scale) as f32;

@@ -57,9 +57,9 @@ impl WatchKind {
         match self {
             Self::Hex => format!("{:#06X}", v.get(vp)),
             Self::U16 => v.get(vp).to_string(),
-            Self::I16 => (v.get(vp) as i16).to_string(),
+            Self::I16 => v.get(vp).cast_signed().to_string(),
             Self::U32 => v.u32(vp).to_string(),
-            Self::I32 => (v.u32(vp) as i32).to_string(),
+            Self::I32 => v.u32(vp).cast_signed().to_string(),
             Self::F32 => f32::from_bits(v.u32(vp)).to_string(),
         }
     }
@@ -70,9 +70,9 @@ impl WatchKind {
         let text = text.trim();
         Some(match self {
             Self::Hex | Self::U16 => vec![u16::try_from(int(text)?).ok()?],
-            Self::I16 => vec![i16::try_from(int(text)?).ok()? as u16],
+            Self::I16 => vec![i16::try_from(int(text)?).ok()?.cast_unsigned()],
             Self::U32 => two(u32::try_from(int(text)?).ok()?),
-            Self::I32 => two(i32::try_from(int(text)?).ok()? as u32),
+            Self::I32 => two(i32::try_from(int(text)?).ok()?.cast_unsigned()),
             Self::F32 => two(text.parse::<f32>().ok()?.to_bits()),
         })
     }
