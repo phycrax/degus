@@ -7,7 +7,7 @@ description = "Simulates a DWIN T5L display running a DWIN_SET"
 [dependencies]
 degus-codec.workspace = true
 degus-set.workspace = true
-thiserror = { workspace = true, features = ["std"] }
+thiserror.workspace = true
 
 [dev-dependencies]
 hex-literal.workspace = true

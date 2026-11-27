@@ -26,7 +26,7 @@ embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "73d6f6c37
 embedded-io-async = "0.7.0"
 hex-literal = "1.1.0"
 serde = { version = "1.0.228", default-features = false }
-thiserror = { version = "2.0.21", default-features = false }
+thiserror = "2.0.21"
 
 [profile.dev.package."*"]
 opt-level = 3

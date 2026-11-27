@@ -12,7 +12,7 @@ defmt = { workspace = true, optional = true }
 embassy-sync.workspace = true
 embedded-io-async.workspace = true
 serde.workspace = true
-thiserror.workspace = true
+thiserror = { workspace = true, default-features = false }
 
 [dev-dependencies]
 embassy-futures = "0.1.2"
