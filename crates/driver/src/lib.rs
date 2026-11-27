@@ -363,10 +363,21 @@ impl<'d, M: RawMutex, TX: IoWrite> Display<'d, M, TX> {
         addr: Address,
         value: &T,
     ) -> Result<Staged<'_, 'd, M, TX>, Error> {
+        self.stage(addr, &mut |room| {
+            degus_serde::to_slice(value, room).map(|data| data.len())
+        })
+    }
+
+    /// [`stage_write`](Self::stage_write) with `encode` writing the data into
+    /// the room it is lent. Not generic, so every value shares one copy of
+    /// the framing, and only serializing it depends on its type.
+    fn stage(
+        &mut self,
+        addr: Address,
+        encode: &mut dyn FnMut(&mut [u8]) -> Result<usize, degus_serde::EncodeError>,
+    ) -> Result<Staged<'_, 'd, M, TX>, Error> {
         let mut writer = Request::begin_write(self.buf, addr, self.crc).map_err(Error::Frame)?;
-        writer
-            .fill(|room| degus_serde::to_slice(value, room).map(|data| data.len()))
-            .map_err(Error::Encode)?;
+        writer.fill(encode).map_err(Error::Encode)?;
         let len = writer.finish().len();
         Ok(Staged {
             display: self,
@@ -418,7 +429,7 @@ pub struct Staged<'a, 'd, M: RawMutex, TX: IoWrite> {
     expect: Expect,
 }
 
-impl<M: RawMutex, TX: IoWrite> Staged<'_, '_, M, TX> {
+impl<'a, 'd, M: RawMutex, TX: IoWrite> Staged<'a, 'd, M, TX> {
     /// Sends the write and waits for its acknowledgement.
     ///
     /// Each call sends it again, so a send that was cancelled, as by a
@@ -432,6 +443,12 @@ impl<M: RawMutex, TX: IoWrite> Staged<'_, '_, M, TX> {
             .transfer(self.expect, self.len)
             .await
             .map(|_| ())
+    }
+
+    /// The display back, to stage the next request once this one is sent.
+    /// Staging over a write not sent yet replaces it.
+    pub fn into_display(self) -> &'a mut Display<'d, M, TX> {
+        self.display
     }
 }
 
