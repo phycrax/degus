@@ -30,50 +30,59 @@ enum Command {
 impl Speaker {
     /// Opens the default output device at `volume`, 0-1. Without the
     /// `audio` feature, it plays nothing.
-    #[cfg(feature = "audio")]
     pub fn new(volume: f32) -> Self {
-        let (commands, receiver) = std::sync::mpsc::channel();
-        let (report, problems) = std::sync::mpsc::channel();
-        let thread_report = report.clone();
-        let spawned = std::thread::Builder::new()
-            .name("degus sim speaker".into())
-            .spawn(move || device::run(&receiver, &thread_report, volume));
-        if let Err(error) = spawned {
-            let _ = report.send(format!("no audio thread, sounds are only logged: {error}"));
+        cfg_select! {
+            feature = "audio" => {
+                let (commands, receiver) = std::sync::mpsc::channel();
+                let (report, problems) = std::sync::mpsc::channel();
+                let thread_report = report.clone();
+                let spawned = std::thread::Builder::new()
+                    .name("degus sim speaker".into())
+                    .spawn(move || device::run(&receiver, &thread_report, volume));
+                if let Err(error) = spawned {
+                    let _ = report.send(format!("no audio thread, sounds are only logged: {error}"));
+                }
+                Self {
+                    commands,
+                    problems: std::sync::Arc::new(parking_lot::Mutex::new(problems)),
+                }
+            }
+            _ => {
+                let _ = volume;
+                Self {}
+            }
         }
-        Self {
-            commands,
-            problems: std::sync::Arc::new(parking_lot::Mutex::new(problems)),
-        }
-    }
-
-    #[cfg(not(feature = "audio"))]
-    pub fn new(volume: f32) -> Self {
-        let _ = volume;
-        Self {}
     }
 
     pub fn play(&self, sound: Sound) {
-        #[cfg(feature = "audio")]
-        let _ = self.commands.send(Command::Play(sound));
-        #[cfg(not(feature = "audio"))]
-        let _ = sound;
+        cfg_select! {
+            feature = "audio" => {
+                let _ = self.commands.send(Command::Play(sound));
+            }
+            _ => {
+                let _ = sound;
+            }
+        }
     }
 
     /// Master volume, 0-1; 0 mutes.
     pub fn set_volume(&self, volume: f32) {
-        #[cfg(feature = "audio")]
-        let _ = self.commands.send(Command::Volume(volume));
-        #[cfg(not(feature = "audio"))]
-        let _ = volume;
+        cfg_select! {
+            feature = "audio" => {
+                let _ = self.commands.send(Command::Volume(volume));
+            }
+            _ => {
+                let _ = volume;
+            }
+        }
     }
 
     /// Problems since the last call, such as a missing output device.
     pub fn problems(&self) -> Vec<String> {
-        #[cfg(feature = "audio")]
-        return self.problems.lock().try_iter().collect();
-        #[cfg(not(feature = "audio"))]
-        Vec::new()
+        cfg_select! {
+            feature = "audio" => self.problems.lock().try_iter().collect(),
+            _ => Vec::new(),
+        }
     }
 }
 
