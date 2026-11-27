@@ -31,7 +31,7 @@ pub(crate) fn run(args: SimArgs) -> Result<(), String> {
     let mut sim = Sim::new(source.read()?);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs());
+        .map_or_default(|d| d.as_secs());
     sim.set_rtc(now);
     let screen = sim.screen();
     let crc = codec_crc(sim.config().crc);
