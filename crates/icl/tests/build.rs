@@ -57,7 +57,10 @@ impl Record<'_> {
     /// require.
     fn jpeg(&self) -> Vec<u8> {
         let (header, stream) = self.payload.split_at(self.header_len);
-        let sos = header.windows(2).rposition(|w| w == [0xFF, 0xDA]).unwrap();
+        let sos = header
+            .array_windows()
+            .rposition(|&w| w == [0xFF, 0xDA])
+            .unwrap();
         let used = 6 + 2 * usize::from(header[sos + 4]);
         let end = stream.iter().rposition(|&b| b != 0).unwrap() + 1;
         let mut jpeg = header[..sos + 2].to_vec();

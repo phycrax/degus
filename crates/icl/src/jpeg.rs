@@ -292,8 +292,8 @@ mod tests {
                 assert!(p.data.ends_with(&[0; TRAILING_ZEROS]));
                 // The SOS length field covers the padding.
                 let sos = p.data[..header_len]
-                    .windows(2)
-                    .rposition(|w| w == [0xFF, SOS])
+                    .array_windows()
+                    .rposition(|&w| w == [0xFF, SOS])
                     .unwrap();
                 assert_eq!(
                     sos + 2 + usize::from(read_u16(&p.data, sos + 2).unwrap()),
@@ -327,7 +327,10 @@ mod tests {
     #[test]
     fn rejects_scan_with_unknown_component() {
         let mut jpeg = baseline(8, 8, SamplingFactor::F_1_1);
-        let sos = jpeg.windows(2).position(|w| w == [0xFF, SOS]).unwrap();
+        let sos = jpeg
+            .array_windows()
+            .position(|&w| w == [0xFF, SOS])
+            .unwrap();
         jpeg[sos + 5] = 9;
         assert_matches!(
             prepare(&jpeg, usize::MAX),

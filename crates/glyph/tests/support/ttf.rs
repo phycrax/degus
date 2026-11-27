@@ -230,9 +230,11 @@ impl TestFont {
         for (tag, data) in &tables {
             let mut padded = data.clone();
             padded.resize(data.len().next_multiple_of(4), 0);
-            let checksum = padded
-                .chunks(4)
-                .map(|w| u32::from_be_bytes([w[0], w[1], w[2], w[3]]))
+            let (words, _) = padded.as_chunks::<4>();
+            let checksum = words
+                .iter()
+                .copied()
+                .map(u32::from_be_bytes)
                 .fold(0u32, u32::wrapping_add);
             font.0.extend_from_slice(*tag);
             font.u32(checksum).u32(offset).u32(data.len() as u32);

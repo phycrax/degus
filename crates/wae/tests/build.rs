@@ -89,8 +89,8 @@ fn built_samples(builder: &WaeBuilder, id: u16) -> Vec<i16> {
 
 fn zero_crossings(samples: &[i16]) -> usize {
     samples
-        .windows(2)
-        .filter(|w| (w[0] < 0) != (w[1] < 0))
+        .array_windows()
+        .filter(|&&[a, b]| (a < 0) != (b < 0))
         .count()
 }
 
@@ -168,7 +168,11 @@ fn companded_clips_use_one_byte_per_sample() {
         assert_eq!(*code & 0x80 != 0, **sample < 0, "sample {sample}");
     }
     pairs.sort_by_key(|(sample, _)| sample.unsigned_abs());
-    assert!(pairs.windows(2).all(|w| w[0].1 & 0x7F <= w[1].1 & 0x7F));
+    assert!(
+        pairs
+            .array_windows()
+            .all(|&[(_, a), (_, b)]| a & 0x7F <= b & 0x7F)
+    );
     assert!(
         pairs.last().unwrap().1 & 0x7F > 0x70,
         "loud samples use high codes"

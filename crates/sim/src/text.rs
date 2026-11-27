@@ -35,11 +35,12 @@ impl Code {
 // ASSUME: `00 00` ends text anywhere `FF FF` does.
 pub(crate) fn text_bytes(vp: &VpSpace, text: &TextVar) -> Vec<u8> {
     let mut bytes = vp.bytes(text.vp, text.length.into());
-    let is_mark = |pair: &[u8]| pair == [0x00, 0x00] || pair == [0xFF, 0xFF];
+    let is_mark = |pair: &[u8; 2]| matches!(pair, [0x00, 0x00] | [0xFF, 0xFF]);
     let end = if text.encoding == Encoding::Unicode {
-        bytes.chunks(2).position(is_mark).map(|i| 2 * i)
+        let (units, _) = bytes.as_chunks::<2>();
+        units.iter().position(is_mark).map(|i| 2 * i)
     } else {
-        bytes.windows(2).position(is_mark)
+        bytes.array_windows().position(is_mark)
     };
     if let Some(end) = end {
         bytes.truncate(end);

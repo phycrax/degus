@@ -132,13 +132,14 @@ impl VpSpace {
         if start + words > VP_WORDS {
             return Err(OutOfRange { start: vp, words });
         }
-        for (i, pair) in bytes.chunks(2).enumerate() {
-            let at = start + i;
-            self.words[at] = match *pair {
-                [high, low] => u16::from_be_bytes([high, low]),
-                [high] => u16::from_be_bytes([high, self.words[at].to_be_bytes()[1]]),
-                _ => unreachable!(),
-            };
+        let target = &mut self.words[start..start + words];
+        let (pairs, odd) = bytes.as_chunks::<2>();
+        for (word, &pair) in target.iter_mut().zip(pairs) {
+            *word = u16::from_be_bytes(pair);
+        }
+        if let [high] = *odd {
+            let last = &mut target[pairs.len()];
+            *last = u16::from_be_bytes([high, last.to_be_bytes()[1]]);
         }
         Ok(())
     }

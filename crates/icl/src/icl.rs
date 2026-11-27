@@ -60,8 +60,8 @@ impl Icon {
         let (header, stream) = self.data.split_at(usize::from(self.header_len));
         // The header ends with the SOS segment, whose body holds no 0xFF.
         let sos = header
-            .windows(2)
-            .rposition(|w| w == [0xFF, 0xDA])
+            .array_windows()
+            .rposition(|&w| w == [0xFF, 0xDA])
             .expect("an icon's header ends with SOS");
         // The SOS length without padding: 6 bytes and 2 per component.
         let used = 6 + 2 * usize::from(header[sos + 4]);
@@ -88,8 +88,8 @@ impl Icon {
             .get(..usize::from(header_len))
             .ok_or(Error::Damaged("its JPEG header is longer than its record"))?;
         let sos = header
-            .windows(2)
-            .rposition(|w| w == [0xFF, 0xDA])
+            .array_windows()
+            .rposition(|&w| w == [0xFF, 0xDA])
             .filter(|_| header.starts_with(&[0xFF, 0xD8]))
             .ok_or(Error::Damaged("its record holds no JPEG header"))?;
         let components = header
