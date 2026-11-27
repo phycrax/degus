@@ -108,11 +108,8 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
 
     /// A word, 0 or 1.
     fn deserialize_bool<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, DecodeError> {
-        match u16::from_be_bytes(self.chunk()?) {
-            0 => visitor.visit_bool(false),
-            1 => visitor.visit_bool(true),
-            _ => Err(DecodeError::BadBool),
-        }
+        let word = u16::from_be_bytes(self.chunk()?);
+        visitor.visit_bool(bool::try_from(word).map_err(|_| DecodeError::BadBool)?)
     }
 
     fn deserialize_unit<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, DecodeError> {
