@@ -704,20 +704,14 @@ impl<'a> Checker<'a> {
 }
 
 /// The widths of font 0, for messages: `which has 4 to 64`.
-const FONT0_RANGE: Font0Range = Font0Range;
-
-struct Font0Range;
-
-impl fmt::Display for Font0Range {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "which has {} to {}",
-            FONT0_WIDTHS.start(),
-            FONT0_WIDTHS.end()
-        )
-    }
-}
+const FONT0_RANGE: fmt::FromFn<fn(&mut fmt::Formatter<'_>) -> fmt::Result> = fmt::from_fn(|f| {
+    write!(
+        f,
+        "which has {} to {}",
+        FONT0_WIDTHS.start(),
+        FONT0_WIDTHS.end()
+    )
+});
 
 /// The characters a number needs: digits, and a sign and a decimal point
 /// if it has them.
